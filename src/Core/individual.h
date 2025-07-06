@@ -16,7 +16,4 @@ class Individual {
     virtual void saveData();
 
     virtual AudioFile<double>::AudioBuffer synthetize(double frequency, double duration, uint32_t sampleRate);
-
-  private:
-    virtual double generate(double frequency, uint32_t sampleRate);
 };

@@ -28,10 +28,7 @@ class OPN2Individual : public Individual {
 
     AudioFile<double>::AudioBuffer synthetize(double frequency, double duration, uint32_t sampleRate) override;
 
-  private:
     uint8_t algorithm;
     uint8_t feedback;
     OPN2Operator operators[4];
-
-    double generate(double frequency, uint32_t sampleRate) override;
 };

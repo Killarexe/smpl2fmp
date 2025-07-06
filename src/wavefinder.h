@@ -19,5 +19,5 @@ class Wavefinder {
     AudioFile<double>targetSamples;
 
     T tournamentSelect(const std::vector<T> population, std::mt19937 rng);
-    double calculateFitness(AudioFile<double>::AudioBuffer samples, std::vector<std::pair<double, double>> targetSpectrum);
+    double calculateFitness(AudioFile<double>::AudioBuffer samples, uint32_t sampleRate, int sampleSize, std::vector<std::pair<double, double>> targetSpectrum);
 };

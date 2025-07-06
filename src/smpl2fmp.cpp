@@ -2,6 +2,8 @@
 
 #include "CLI11/CLI11.hpp"
 #include "AudioFile/AudioFile.h"
+#include "Core/Individuals/OPN2Individual.h"
+#include "wavefinder.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -56,6 +58,9 @@ int init(int argc, char **argv) {
 
   AudioFile<double> input_samples;
   input_samples.load(input_filename);
+
+  Wavefinder<OPN2Individual> wavefinder(input_samples, populations, tournaments, mutate_rate);
+  wavefinder.run(generations);
 
   return 0;
 }

@@ -27,7 +27,3 @@ AudioFile<double>::AudioBuffer Individual::synthetize(double _frequency, double 
   AudioFile<double>::AudioBuffer buffer;
   return buffer;
 }
-
-double Individual::generate(double _frequency, uint32_t _sampleRate) {
-  return 0.0;
-}
