@@ -3,11 +3,14 @@
 #include "CLI11/CLI11.hpp"
 #include "AudioFile/AudioFile.h"
 #include "Core/Individuals/OPN2Individual.h"
+#include "Core/individual.h"
 #include "wavefinder.h"
 
-#include <cstdint>
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
+#include <ostream>
+#include <random>
 
 namespace fs = std::filesystem;
 
@@ -21,14 +24,17 @@ int init(int argc, char **argv) {
   fs::path output_sample_filename = "";
   app.add_option("-o,--output", output_sample_filename, "Output FM sample file");
 
-  uint16_t generations = 1000;
+  size_t generations = 1000;
   app.add_option("-g,--generations", generations, "Number of generations");
 
-  uint16_t populations = 100;
+  size_t populations = 100;
   app.add_option("-p,--populations", populations, "Number of populations per generations");
 
-  uint16_t tournaments = 3;
+  size_t tournaments = 3;
   app.add_option("-t,--tournaments", tournaments, "Number of tournaments on the selection phase");
+
+  size_t elites = 3;
+  app.add_option("-e,--elites", tournaments, "Number of elites on the selection phase");
 
   double mutate_rate = 0.2;
   app.add_option("-m,--mutate", mutate_rate, "Mutation rate on the mixing phase");
@@ -59,8 +65,14 @@ int init(int argc, char **argv) {
   AudioFile<double> input_samples;
   input_samples.load(input_filename);
 
-  Wavefinder<OPN2Individual> wavefinder(input_samples, populations, tournaments, mutate_rate);
-  wavefinder.run(generations);
+  auto wavefinder = createWavefinder<OPN2Individual>(populations, generations, tournaments, elites, mutate_rate, std::random_device{}());
+  Individual* result = wavefinder->find(input_samples);
 
+  std::cout << "Finished! Best fitness: " << result->fitness << "\nFM patch:" << std::endl;
+  result->printData();
+
+  if (!output_sample_filename.empty()) {
+    result->saveAudio(output_sample_filename, wavefinder->targetFrequency, input_samples.getLengthInSeconds(), input_samples.getSampleRate());
+  }
   return 0;
 }

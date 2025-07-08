@@ -1,29 +1,12 @@
 #include "individual.h"
 #include "AudioFile/AudioFile.h"
 #include <cstdint>
-#include <random>
 
-Individual Individual::crossover(Individual* _parent, std::mt19937 _rng) {
-  return Individual();
-}
-
-void Individual::mutate(double _mutationRate, std::mt19937 _rng) {
-  return;
-}
-
-void Individual::randomize(std::mt19937 _rng) {
-  return;
-}
-
-void Individual::printData() {
-  return;
-}
-
-void Individual::saveData() {
-  return;
-}
-
-AudioFile<double>::AudioBuffer Individual::synthetize(double _frequency, double _duration, uint32_t _sampleRate) {
-  AudioFile<double>::AudioBuffer buffer;
-  return buffer;
+void Individual::saveAudio(std::filesystem::path path, double frequency, double duration, uint32_t sampleRate) {
+  AudioFile<double>::AudioBuffer buffer = synthetize(frequency, duration, sampleRate);
+  AudioFile<double> audio;
+  audio.setSampleRate(sampleRate);
+  audio.setAudioBuffer(buffer);
+  audio.setAudioBufferSize(buffer.size(), buffer[0].size());
+  audio.save(path, AudioFileFormat::Wave);
 }

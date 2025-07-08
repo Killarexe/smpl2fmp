@@ -2,6 +2,7 @@
 #include "AudioFile/AudioFile.h"
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 #include <random>
 #include "FMCores/Nuked-OPN2/ym3438.h"
 
@@ -45,9 +46,9 @@ Individual OPN2Individual::crossover(Individual* parent, std::mt19937 rng) {
 void OPN2Individual::mutate(double mutationRate, std::mt19937 rng) {
   std::uniform_real_distribution<double> mut_dis(0.0, 1.0);
   std::uniform_int_distribution<uint8_t> first_dis(0, 7);
-  std::uniform_int_distribution<uint8_t> second_dis(0, 16);
-  std::uniform_int_distribution<uint8_t> third_dis(0, 32);
-  std::uniform_int_distribution<uint8_t> forth_dis(0, 128);
+  std::uniform_int_distribution<uint8_t> second_dis(0, 15);
+  std::uniform_int_distribution<uint8_t> third_dis(0, 31);
+  std::uniform_int_distribution<uint8_t> forth_dis(0, 127);
 
   for (uint8_t i = 0; i < 4; i++) {
     if (mut_dis(rng) < mutationRate) {
@@ -79,7 +80,16 @@ void OPN2Individual::randomize(std::mt19937 rng) {
 }
 
 void OPN2Individual::printData() {
-
+  std::cout << "Algorithm: " << algorithm << "\nFeedback: " << (int)feedback << std::endl;
+  for (uint8_t index = 0; index < 4; index++) {
+    OPN2Operator op = operators[index];
+    std::cout << "Operator n°" << index + 1 << std::endl;
+    std::cout << "Multiple: " << (int)op.multiple << std::endl;
+    std::cout << "Total level: " << (int)op.totalLevel << std::endl;
+    std::cout << "Attack rate: " << (int)op.attackRate << std::endl;
+    std::cout << "Decay rate: " << (int)op.decayRate << std::endl;
+    std::cout << "Sustain level: " << (int)op.sustainLevel << std::endl;
+  }
 }
 
 void OPN2Individual::saveData() {
@@ -120,13 +130,15 @@ static void setPatch(ym3438_t* chip, OPN2Individual* patch) {
   uint8_t algorithmFeedback = (patch->feedback << 3) | patch->algorithm;
   OPN2_Write(chip, 0, 0xB0 + CHANNEL);
   OPN2_Write(chip, 1, algorithmFeedback);
+  OPN2_Write(chip, 0, 0xB4 + CHANNEL);
+  OPN2_Write(chip, 1, 0xC0); // Stereo + AMS + FMS
 
   for (uint8_t index = 0; index < 4; index++) {
     uint8_t baseRegister = OP_OFFSETS[index] + CHANNEL;
     uint8_t detuneMultiplier = (0 << 4) | patch->operators[index].multiple; //TODO: Add detune
     uint8_t keyScaleAttackRate = (0 << 6) | patch->operators[index].attackRate; //TODO: Add env scale
     uint8_t AMDecayRate = (0 << 7) | patch->operators[index].decayRate;
-    uint8_t sustainLevelReleaseRate = (patch->operators[index].sustainLevel << 4) | 0;
+    uint8_t sustainLevelReleaseRate = (patch->operators[index].sustainLevel << 4) | 0x0F;
     
     OPN2_Write(chip, 0, baseRegister);
     OPN2_Write(chip, 1, detuneMultiplier);
@@ -141,7 +153,7 @@ static void setPatch(ym3438_t* chip, OPN2Individual* patch) {
     OPN2_Write(chip, 1, AMDecayRate);
 
     OPN2_Write(chip, 0, baseRegister + 0x40);
-    OPN2_Write(chip, 1, 0); //TODO: Sustain rate
+    OPN2_Write(chip, 1, 0x0); //TODO: Sustain rate
 
     OPN2_Write(chip, 0, baseRegister + 0x50);
     OPN2_Write(chip, 1, sustainLevelReleaseRate);
@@ -161,7 +173,7 @@ AudioFile<double>::AudioBuffer OPN2Individual::synthetize(double frequency, doub
 
   ym3438_t chip;
   OPN2_Reset(&chip);
-  OPN2_SetChipType(1);
+  OPN2_SetChipType(ym3438_mode_ym2612);
 
   setPatch(&chip, this);
 
