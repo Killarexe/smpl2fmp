@@ -33,9 +33,6 @@ int init(int argc, char **argv) {
   size_t tournaments = 3;
   app.add_option("-t,--tournaments", tournaments, "Number of tournaments on the selection phase");
 
-  size_t elites = 3;
-  app.add_option("-e,--elites", tournaments, "Number of elites on the selection phase");
-
   double mutate_rate = 0.2;
   app.add_option("-m,--mutate", mutate_rate, "Mutation rate on the mixing phase");
 
@@ -65,7 +62,7 @@ int init(int argc, char **argv) {
   AudioFile<double> input_samples;
   input_samples.load(input_filename);
 
-  auto wavefinder = createWavefinder<OPN2Individual>(populations, generations, tournaments, elites, mutate_rate, std::random_device{}());
+  auto wavefinder = createWavefinder<OPN2Individual>(populations, generations, tournaments, mutate_rate, std::random_device{}());
   Individual* result = wavefinder->find(input_samples);
 
   std::cout << "Finished! Best fitness: " << result->fitness << "\nFM patch:" << std::endl;

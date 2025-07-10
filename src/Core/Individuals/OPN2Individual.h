@@ -2,24 +2,27 @@
 
 #include "Core/individual.h"
 #include <cstdint>
+#include <memory>
 #include <random>
+
+constexpr size_t OPN2_OPERATOR_COUNT = 4;
 
 class OPN2Operator {
   public:
-    uint8_t multiple;
-    uint8_t totalLevel;
-    uint8_t attackRate;
-    uint8_t decayRate;
-    uint8_t sustainLevel;
+    uint8_t multiple = 0;
+    uint8_t totalLevel = 0;
+    uint8_t attackRate = 0;
+    uint8_t decayRate = 0;
+    uint8_t sustainLevel = 0;
 
-    OPN2Operator(){}
+    OPN2Operator() = default;
 };
 
 class OPN2Individual : public Individual {
   public:
-    OPN2Individual();
+    OPN2Individual() = default;
 
-    Individual crossover(Individual* parent, std::mt19937 rng) override;
+    std::unique_ptr<Individual> crossover(Individual* parent, std::mt19937 rng) override;
     void mutate(double mutationRate, std::mt19937 rng) override;
     void randomize(std::mt19937 rng) override;
 
@@ -28,7 +31,9 @@ class OPN2Individual : public Individual {
 
     AudioFile<double>::AudioBuffer synthetize(double frequency, double duration, uint32_t sampleRate) override;
 
-    uint8_t algorithm;
-    uint8_t feedback;
-    OPN2Operator operators[4];
+    std::unique_ptr<Individual> clone() const override;
+
+    uint8_t algorithm = 0;
+    uint8_t feedback = 0;
+    OPN2Operator operators[OPN2_OPERATOR_COUNT];
 };

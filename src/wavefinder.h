@@ -17,7 +17,6 @@ class Wavefinder {
     size_t populationSize;
     size_t maxGenerations;
     size_t tournamentSize;
-    size_t eliteSize;
     double mutationRate;
 
     AudioFile<double>targetSamples;
@@ -37,10 +36,9 @@ class Wavefinder {
     void freeFFTW();
     void computeFFT(const AudioFile<double>::AudioBuffer& buffer, fftw_complex* output);
 
-    void selectPopulation();
+    size_t tournamentSelection(size_t size);
     void crossoverPopulation();
     void mutatePopulation();
-    std::vector<size_t> tournamentSelection(size_t size, size_t count);
   
   public:
     double targetFrequency;
@@ -50,14 +48,12 @@ class Wavefinder {
       size_t popSize = 100,
       size_t genSize = 100,
       size_t turSize = 3,
-      size_t elitSize = 3,
       double mutRate = 0.1,
       unsigned int seed = std::random_device{}()
     ) : rng(seed),
       populationSize(popSize),
       maxGenerations(genSize),
       tournamentSize(turSize),
-      eliteSize(elitSize),
       mutationRate(mutRate),
       targetFFT(nullptr),
       synthFFT(nullptr),
@@ -81,9 +77,9 @@ class Wavefinder {
 };
 
 template<typename IndividualType>
-std::unique_ptr<Wavefinder> createWavefinder(size_t populationSize, size_t maxGenerations, size_t tournamentSize, size_t eliteSize, double mutationRate, unsigned int seed) {
+std::unique_ptr<Wavefinder> createWavefinder(size_t populationSize, size_t maxGenerations, size_t tournamentSize, double mutationRate, unsigned int seed) {
   auto factory = []() -> std::unique_ptr<Individual> {
     return std::make_unique<IndividualType>();
   };
-  return std::make_unique<Wavefinder>(factory, populationSize, maxGenerations, tournamentSize, eliteSize, mutationRate, seed);
+  return std::make_unique<Wavefinder>(factory, populationSize, maxGenerations, tournamentSize, mutationRate, seed);
 }

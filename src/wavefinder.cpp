@@ -34,9 +34,14 @@ Individual* Wavefinder::find(const AudioFile<double> targetSamples) {
 
     if (generation % 10 == 0) {
       std::cout << "Generation n°" << generation << ": Best fitness => " << getBestFitness() << std::endl;
+      getBestIndividual()->printData();
     }
 
-    selectPopulation();
+    std::sort(population.begin(), population.end(),
+      [](std::unique_ptr<Individual>& a, std::unique_ptr<Individual>& b) {
+        return a->fitness < b->fitness;
+      }
+    );
     crossoverPopulation();
     mutatePopulation();
   }
@@ -146,75 +151,41 @@ void Wavefinder::freeFFTW() {
   }
 }
 
-void Wavefinder::selectPopulation() {
-  std::sort(
-    population.begin(), population.end(),
-    [](const std::unique_ptr<Individual>& a, const std::unique_ptr<Individual>& b) {
-      return a->fitness < b->fitness;
+size_t Wavefinder::tournamentSelection(size_t tournamentSize) {
+  std::uniform_int_distribution<size_t> dis(0, population.size() - 1);
+  size_t bestIndex = dis(rng);
+  double bestFitness = population[bestIndex]->fitness;
+  for (size_t i = 0; i < tournamentSize; i++) {
+    size_t contestantIndex = dis(rng);
+    double contestantFitness = population[contestantIndex]->fitness;
+    if (bestFitness < contestantFitness) {
+      bestFitness = contestantFitness;
+      bestIndex = contestantIndex;
     }
-  );
+  }
+  return bestIndex;
+}
 
+void Wavefinder::crossoverPopulation() {
+  std::uniform_int_distribution<size_t> parentDist(0, population.size() - 1);
   std::vector<std::unique_ptr<Individual>> newPopulation;
   newPopulation.reserve(populationSize);
+  newPopulation.push_back(population[0]->clone());
 
-  for (size_t i = 0; i < eliteSize && i < population.size(); i++) {
-    auto elite = individualFactory();
-    *elite = *population[i];
-    newPopulation.push_back(std::move(elite));
-  }
+  for (size_t i = 1; i < population.size(); i++) {
+    size_t parent1Index = tournamentSelection(tournamentSize);
+    size_t parent2Index = tournamentSelection(tournamentSize);
 
-  std::vector<size_t> selectedIndices = tournamentSelection(tournamentSize, populationSize - eliteSize);
-  for (size_t index : selectedIndices) {
-    auto selected = individualFactory();
-    *selected = *population[index];
-    newPopulation.push_back(std::move(selected));
+    auto child = population[parent1Index]->crossover(population[parent2Index].get(), rng);
+
+    newPopulation.push_back(std::move(child));
   }
 
   population = std::move(newPopulation);
 }
 
-std::vector<size_t> Wavefinder::tournamentSelection(size_t tournamentSize, size_t count) {
-  std::vector<size_t> selected;
-  selected.reserve(count);
-
-  std::uniform_int_distribution<size_t> dist(0, population.size() - 1);
-  for (size_t i = 0; i < count; i++) {
-    size_t bestIndex = dist(rng);
-    double bestFitness = population[bestIndex]->fitness;
-
-    for (size_t j = 1; j < tournamentSize; j++) {
-      size_t candidateIndex = dist(rng);
-      if (population[candidateIndex]->fitness < bestFitness) {
-        bestIndex = candidateIndex;
-        bestFitness = population[candidateIndex]->fitness;
-      }
-    }
-
-    selected.push_back(bestIndex);
-  }
-
-  return selected;
-}
-
-void Wavefinder::crossoverPopulation() {
-  std::uniform_int_distribution<size_t> parentDist(0, population.size() - 1);
-
-  for (size_t i = eliteSize; i < population.size(); i += 2) {
-    if (i + 1 < population.size()) {
-      size_t parent1Index = parentDist(rng);
-      size_t parent2Index = parentDist(rng);
-
-      auto child1 = population[parent1Index]->crossover(population[parent2Index].get(), rng);
-      auto child2 = population[parent2Index]->crossover(population[parent1Index].get(), rng);
-
-      population[i] = std::make_unique<Individual>(std::move(child1));
-      population[i + 1] = std::make_unique<Individual>(std::move(child2));
-    }
-  }
-}
-
 void Wavefinder::mutatePopulation() {
-  for (size_t i = eliteSize; i < population.size(); i++) {
+  for (size_t i = 1; i < population.size(); i++) {
     population[i]->mutate(mutationRate, rng);
   }
 }
