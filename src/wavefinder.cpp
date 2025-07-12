@@ -137,7 +137,8 @@ void Wavefinder::findTargetBaseFrequency() {
       baseFrequencyIndex = i;
     }
   }
-  targetFrequency = (double)baseFrequencyIndex / (double)targetSamples.getSampleRate() / (double)targetSamples.samples[0].size();
+  targetFrequency = (double)baseFrequencyIndex * ((double)targetSamples.getSampleRate() / (double)targetSamples.samples[0].size());
+  std::cout << "Found base frequency: " << targetFrequency << std::endl;
 }
 
 void Wavefinder::freeFFTW() {

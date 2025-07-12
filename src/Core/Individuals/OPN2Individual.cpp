@@ -174,10 +174,10 @@ static void setSimplePatch(ym3438_t* chip) {
   OPN2_Write(chip, 0, 0xB4 + CHANNEL);
   OPN2_Write(chip, 1, 0xC0);
   
-  // Just configure operator 1 (carrier in algorithm 0)
-  uint8_t op1_base = OP_OFFSETS[3] + CHANNEL;
+  // Just configure operator 4 (carrier in algorithm 0)
+  uint8_t op1_base = OP_OFFSETS[0] + CHANNEL;
   
-  // DT=0, MUL=1
+  // DT=0, MUL=0
   OPN2_Write(chip, 0, op1_base);
   OPN2_Write(chip, 1, 0x01);
   
@@ -222,6 +222,7 @@ AudioFile<double>::AudioBuffer OPN2Individual::synthetize(double frequency, doub
   OPN2_Write(chip, 0, 0x22);
   OPN2_Write(chip, 1, 0x00);
 
+  //Disable Timer A & B and put on normal mode
   OPN2_Write(chip, 0, 0x24);
   OPN2_Write(chip, 1, 0x00);
   OPN2_Write(chip, 0, 0x25);
@@ -243,6 +244,9 @@ AudioFile<double>::AudioBuffer OPN2Individual::synthetize(double frequency, doub
 
   OPN2_Write(chip, 0, 0x28);
   OPN2_Write(chip, 1, 0x00 | CHANNEL);
+  for (uint8_t channel = 1; channel < 6; channel++) {
+    OPN2_Write(chip, 1, 0x00 | channel);
+  }
   
   // Clock a few cycles
   int16_t dummy[2];
@@ -253,13 +257,10 @@ AudioFile<double>::AudioBuffer OPN2Individual::synthetize(double frequency, doub
   // Now key on
   OPN2_Write(chip, 0, 0x28);
   OPN2_Write(chip, 1, 0xF0 | CHANNEL);
-  for (uint8_t channel = 1; channel < 7; channel++) {
-    OPN2_Write(chip, 1, 0xF0 | channel);
-  }
 
   const double samplesPerClock = sampleRate / CHIP_RATE;
   double clockAccumulator = 0.0;
-  int16_t chipBuffer[2];
+  int16_t chipBuffer[2] = {0, 0};
   uint32_t sampleIndex = 0;
   int debugCount = 0;
   while (sampleIndex < totalSamples) {
