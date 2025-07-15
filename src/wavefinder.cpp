@@ -37,11 +37,6 @@ Individual* Wavefinder::find(const AudioFile<double> targetSamples) {
       getBestIndividual()->printData();
     }
 
-    std::sort(population.begin(), population.end(),
-      [](std::unique_ptr<Individual>& a, std::unique_ptr<Individual>& b) {
-        return a->fitness < b->fitness;
-      }
-    );
     crossoverPopulation();
     mutatePopulation();
   }
@@ -171,7 +166,7 @@ void Wavefinder::crossoverPopulation() {
   std::uniform_int_distribution<size_t> parentDist(0, population.size() - 1);
   std::vector<std::unique_ptr<Individual>> newPopulation;
   newPopulation.reserve(populationSize);
-  newPopulation.push_back(population[0]->clone());
+  newPopulation.push_back(getBestIndividual()->clone());
 
   for (size_t i = 1; i < population.size(); i++) {
     size_t parent1Index = tournamentSelection(tournamentSize);
