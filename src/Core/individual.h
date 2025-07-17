@@ -8,7 +8,7 @@
 
 class Individual {
   public:
-    double fitness;
+    double fitness = 0;
 
     void saveAudio(std::filesystem::path path, double frequency, double duration, uint32_t sampleRate);
 

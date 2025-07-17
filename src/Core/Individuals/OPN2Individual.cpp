@@ -19,6 +19,7 @@ std::unique_ptr<Individual> OPN2Individual::crossover(Individual* parent, std::m
   const OPN2Individual* castParent = dynamic_cast<OPN2Individual*>(parent);
 
   OPN2Individual child;
+  child.fitness = 0;
   std::uniform_real_distribution<double> dis(0.0, 1.0);
 
   for (size_t i = 0; i < OPN2_OPERATOR_COUNT; i++) {
@@ -201,8 +202,8 @@ AudioFile<double>::AudioBuffer OPN2Individual::synthetize(double frequency, doub
   writeChipRegister(chip, 0x28, 0x00 | CHANNEL);
 
   for (size_t i = 0; i < totalSamples; i++) {
-    result[0][i] = (double)buffer[0][i] / 8192.0; 
-    result[1][i] = (double)buffer[1][i] / 8192.0; 
+    result[0][i] = (double)buffer[0][i] / 16384.0; 
+    result[1][i] = (double)buffer[1][i] / 16384.0; 
   }
 
   free(leftBuffer);

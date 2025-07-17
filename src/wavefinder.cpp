@@ -26,25 +26,6 @@ void Wavefinder::setTarget(const AudioFile<double> target) {
   initFFTW();
 }
 
-Individual* Wavefinder::find(const AudioFile<double> targetSamples) {
-  setTarget(targetSamples);
-
-  for (size_t generation = 0; generation < maxGenerations; generation++) {
-    calculateFitness();
-
-    if (generation % 10 == 0) {
-      std::cout << "Generation n°" << generation << ": Best fitness => " << getBestFitness() << std::endl;
-      getBestIndividual()->printData();
-    }
-
-    crossoverPopulation();
-    mutatePopulation();
-  }
-
-  calculateFitness();
-  return getBestIndividual();
-}
-
 void Wavefinder::calculateFitness() {
   for (auto& individual : population) {
     AudioFile<double>::AudioBuffer synthesized = individual->synthetize(targetFrequency, targetSamples.getLengthInSeconds(), targetSamples.getSampleRate());
@@ -57,20 +38,43 @@ double Wavefinder::calculateSpectralDistanceFromTarget(const AudioFile<double>::
     return 1.0;
   }
 
-  size_t minSize = std::min(buffer[0].size(), targetSamples.samples[0].size());
-  if (minSize == 0) {
-    return 1.0;
-  }
-
   computeFFT(buffer, synthFFT);
 
-  double diffSum = 0.0;
+  double spectralDiff = 0.0;
   for (size_t i = 0; i < fftSize; i++) {
     double synthNorm = std::sqrt(synthFFT[i][0] * synthFFT[i][0] + synthFFT[i][1] * synthFFT[i][1]);
     double targetNorm = std::sqrt(targetFFT[i][0] * targetFFT[i][0] + targetFFT[i][1] * targetFFT[i][1]);
-    diffSum += std::abs(synthNorm - targetNorm);
+    spectralDiff += std::abs(synthNorm - targetNorm);
   }
-  return (double)fftSize / (1.0 + diffSum);
+
+  double timeDiff = 0.0;
+  for (size_t i = 0; i < fftSize; i++) {
+    timeDiff += std::abs(buffer[0][i] - targetSamples.samples[0][i]);
+  }
+
+  const size_t windowSize = buffer[0].size() / 10;
+  std::vector<double> synthEnergy, targetEnergy;
+  for (size_t w = 0; w < 10; w++) {
+    size_t start = w * windowSize;
+    size_t end = std::min(start + windowSize, buffer[0].size());
+
+    double synthRMS = 0.0;
+    double targetRMS = 0.0;
+    for (size_t i = start; i < end; i++) {
+      synthRMS += buffer[0][i] * buffer[0][i];
+      targetRMS += targetSamples.samples[0][i] * targetSamples.samples[0][i];
+    }
+    synthEnergy.push_back(std::sqrt(synthRMS / (end - start)));
+    targetEnergy.push_back(std::sqrt(targetRMS / (end - start)));
+  }
+
+  double envelopeDiff = 0.0;
+  for (size_t i = 0; i < 10; i++) {
+    envelopeDiff += std::abs(synthEnergy[i] - targetEnergy[i]);
+  }
+
+  double difference = spectralDiff + timeDiff * 0.5 + envelopeDiff * 0.5;
+  return (double)fftSize / (1.0 + difference);
 }
 
 void Wavefinder::computeFFT(const AudioFile<double>::AudioBuffer& buffer, fftw_complex* output) {
@@ -90,11 +94,6 @@ void Wavefinder::computeFFT(const AudioFile<double>::AudioBuffer& buffer, fftw_c
     for (double& sample : monoBuffer) {
       sample /= buffer.size();
     }
-  }
-
-  for (size_t i = 0; i < bufferSize; i++) {
-    double window = 0.5 * (1.0 - cos(2.0 * M_PI * i / (bufferSize - 1)));
-    monoBuffer[i] *= window;
   }
 
   fftw_plan plan = fftw_plan_dft_r2c_1d(bufferSize, monoBuffer.data(), output, FFTW_ESTIMATE);
@@ -194,7 +193,7 @@ Individual* Wavefinder::getBestIndividual() {
   auto best = std::min_element(
     population.begin(), population.end(),
     [](const std::unique_ptr<Individual>& a, const std::unique_ptr<Individual>& b) {
-      return a->fitness < b->fitness;
+      return a->fitness > b->fitness;
     }
   );
 
@@ -204,4 +203,20 @@ Individual* Wavefinder::getBestIndividual() {
 double Wavefinder::getBestFitness() {
   Individual* best = getBestIndividual();
   return best ? best->fitness : 0.0;
+}
+
+Individual* Wavefinder::find(const AudioFile<double> targetSamples) {
+  setTarget(targetSamples);
+
+  for (size_t generation = 0; generation < maxGenerations; generation++) {
+    calculateFitness();
+
+    std::cout << "Generation n°" << generation << ": Best fitness => " << getBestFitness() << std::endl;
+
+    crossoverPopulation();
+    mutatePopulation();
+  }
+
+  calculateFitness();
+  return getBestIndividual();
 }
