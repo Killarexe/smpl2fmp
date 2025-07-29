@@ -91,8 +91,8 @@ void OPN2Individual::printData() {
     std::cout << "Multiple: " << (int)op.multiple << std::endl;
     std::cout << "Total level: " << (int)op.totalLevel << std::endl;
     std::cout << "Attack rate: " << (int)op.attackRate << std::endl;
-    std::cout << "Decay rate: " << (int)op.decayRate - 3 << std::endl;
-    std::cout << "Detune: " << (int)op.detune << std::endl;
+    std::cout << "Decay rate: " << (int)op.decayRate<< std::endl;
+    std::cout << "Detune: " << (int)op.detune - 3 << std::endl;
     std::cout << "Sustain level: " << (int)op.sustainLevel << "\n" <<std::endl;
   }
 }
