@@ -1,6 +1,5 @@
 #include "OPN2Individual.h"
 #include "AudioFile/AudioFile.h"
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -15,7 +14,7 @@ constexpr uint8_t CHANNEL = 0;
 constexpr double CHIP_CLOCK = 7670454.0;
 constexpr uint8_t OP_OFFSETS[4] = {0x30, 0x34, 0x38, 0x3C};
 
-std::unique_ptr<Individual> OPN2Individual::crossover(Individual* parent, std::mt19937 rng) {
+std::unique_ptr<Individual> OPN2Individual::crossover(Individual* parent, std::mt19937& rng) {
   const OPN2Individual* castParent = dynamic_cast<OPN2Individual*>(parent);
 
   OPN2Individual child;
@@ -45,7 +44,7 @@ std::unique_ptr<Individual> OPN2Individual::crossover(Individual* parent, std::m
   return child.clone();
 }
 
-void OPN2Individual::mutate(double mutationRate, std::mt19937 rng) {
+void OPN2Individual::mutate(double mutationRate, std::mt19937& rng) {
   std::uniform_real_distribution<double> mut_dis(0.0, 1.0);
   std::uniform_int_distribution<uint8_t> first_dis(0, 7);
   std::uniform_int_distribution<uint8_t> second_dis(0, 15);
@@ -68,6 +67,9 @@ void OPN2Individual::mutate(double mutationRate, std::mt19937 rng) {
     if (mut_dis(rng) < mutationRate) {
       this->operators[i].sustainLevel = second_dis(rng);
     }
+    if (mut_dis(rng) < mutationRate) {
+      this->operators[i].detune = first_dis(rng);
+    }
   }
   if (mut_dis(rng) < mutationRate) {
     this->algorithm = first_dis(rng);
@@ -77,7 +79,7 @@ void OPN2Individual::mutate(double mutationRate, std::mt19937 rng) {
   }
 }
 
-void OPN2Individual::randomize(std::mt19937 rng) {
+void OPN2Individual::randomize(std::mt19937& rng) {
   mutate(1.1, rng);
 }
 
@@ -89,7 +91,8 @@ void OPN2Individual::printData() {
     std::cout << "Multiple: " << (int)op.multiple << std::endl;
     std::cout << "Total level: " << (int)op.totalLevel << std::endl;
     std::cout << "Attack rate: " << (int)op.attackRate << std::endl;
-    std::cout << "Decay rate: " << (int)op.decayRate << std::endl;
+    std::cout << "Decay rate: " << (int)op.decayRate - 3 << std::endl;
+    std::cout << "Detune: " << (int)op.detune << std::endl;
     std::cout << "Sustain level: " << (int)op.sustainLevel << "\n" <<std::endl;
   }
 }
@@ -133,15 +136,15 @@ static void writeChipRegister(ym3438_t* chip, uint8_t address, uint8_t data) {
   OPN2_WriteBuffered(chip, 1, data);
 }
 
-static void setPatch(ym3438_t* chip, OPN2Individual* patch) {
-  unsigned char algorithmFeedback = (patch->feedback << 3) | patch->algorithm;
+void OPN2Individual::setPatch(ym3438_t* chip) {
+  unsigned char algorithmFeedback = (feedback << 3) | algorithm;
   writeChipRegister(chip, 0xB0 + CHANNEL, algorithmFeedback);
   writeChipRegister(chip, 0xB4 + CHANNEL, 0xC0); // Stereo + AMS + FMS
 
   for (unsigned char op_index = 0; op_index < 4; op_index++) {
-    OPN2Operator op = patch->operators[op_index];
+    OPN2Operator op = operators[op_index];
     unsigned char base_register = OP_OFFSETS[op_index] + CHANNEL;
-    unsigned char detune_multiplier = (0 << 4) | op.multiple;
+    unsigned char detune_multiplier = (op.detune << 4) | op.multiple;
     unsigned char keyscale_attackrate = (0 << 6) | op.attackRate;
     unsigned char am_decay_rate = (0 << 7) | op.decayRate; // No AM
     unsigned char sustainlevel_releaserate = (op.sustainLevel << 4) | 0x0F;
@@ -164,42 +167,42 @@ AudioFile<double>::AudioBuffer OPN2Individual::synthetize(double frequency, doub
   result[0].resize(totalSamples);
   result[1].resize(totalSamples);
 
-  ym3438_t* chip = new ym3438_t;
-  OPN2_Reset(chip, sampleRate, CHIP_CLOCK);
+  ym3438_t chip;
+  OPN2_Reset(&chip, sampleRate, CHIP_CLOCK);
   OPN2_SetOptions(ym3438_type_ym2612);
 
   // Disable DAC and disable LFO
-  writeChipRegister(chip, 0x2A, 0);
-  writeChipRegister(chip, 0x2B, 0);
-  writeChipRegister(chip, 0x22, 0);
+  writeChipRegister(&chip, 0x2A, 0);
+  writeChipRegister(&chip, 0x2B, 0);
+  writeChipRegister(&chip, 0x22, 0);
 
   // Disable Timer A & B and put on normal mode
-  writeChipRegister(chip, 0x24, 0);
-  writeChipRegister(chip, 0x25, 0);
-  writeChipRegister(chip, 0x26, 0);
-  writeChipRegister(chip, 0x27, 0);
+  writeChipRegister(&chip, 0x24, 0);
+  writeChipRegister(&chip, 0x25, 0);
+  writeChipRegister(&chip, 0x26, 0);
+  writeChipRegister(&chip, 0x27, 0);
 
-  setPatch(chip, this);
+  setPatch(&chip);
 
   uint16_t fNum = getFNum(frequency);
   uint8_t octave = getOctave(frequency);
 
-  writeChipRegister(chip, 0xA4 + CHANNEL, ((octave << 3) | (fNum >> 8)) & 0x3F);
-  writeChipRegister(chip, 0xA0 + CHANNEL, fNum & 0xFF);
+  writeChipRegister(&chip, 0xA4 + CHANNEL, ((octave << 3) | (fNum >> 8)) & 0x3F);
+  writeChipRegister(&chip, 0xA0 + CHANNEL, fNum & 0xFF);
 
   for (unsigned char channel = 0; channel < 6; channel++) {
-    writeChipRegister(chip, 0x28, 0x00 | channel);
+    writeChipRegister(&chip, 0x28, 0x00 | channel);
   }
 
   int32_t* leftBuffer = (int32_t*)malloc(sizeof(int32_t) * totalSamples);
   int32_t* rightBuffer = (int32_t*)malloc(sizeof(int32_t) * totalSamples);
   int32_t* buffer[2] = {leftBuffer, rightBuffer};
 
-  writeChipRegister(chip, 0x28, 0xF0 | CHANNEL);
+  writeChipRegister(&chip, 0x28, 0xF0 | CHANNEL);
 
-  OPN2_GenerateStream(chip, buffer, totalSamples);
+  OPN2_GenerateStream(&chip, buffer, totalSamples);
 
-  writeChipRegister(chip, 0x28, 0x00 | CHANNEL);
+  writeChipRegister(&chip, 0x28, 0x00 | CHANNEL);
 
   for (size_t i = 0; i < totalSamples; i++) {
     result[0][i] = (double)buffer[0][i] / 16384.0; 
@@ -209,7 +212,6 @@ AudioFile<double>::AudioBuffer OPN2Individual::synthetize(double frequency, doub
   free(leftBuffer);
   free(rightBuffer);
 
-  delete chip;
   return result;
 }
 

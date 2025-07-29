@@ -12,9 +12,9 @@ class Individual {
 
     void saveAudio(std::filesystem::path path, double frequency, double duration, uint32_t sampleRate);
 
-    virtual std::unique_ptr<Individual> crossover(Individual* parent, std::mt19937 rng) = 0;
-    virtual void mutate(double mutationRate, std::mt19937 rng) = 0;
-    virtual void randomize(std::mt19937 rng) = 0;
+    virtual std::unique_ptr<Individual> crossover(Individual* parent, std::mt19937& rng) = 0;
+    virtual void mutate(double mutationRate, std::mt19937& rng) = 0;
+    virtual void randomize(std::mt19937& rng) = 0;
 
     virtual void printData() = 0;
     virtual void saveData() = 0;

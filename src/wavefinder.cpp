@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <fftw3.h>
 #include <iostream>
 #include <memory>
@@ -41,14 +42,13 @@ double Wavefinder::calculateSpectralDistanceFromTarget(const AudioFile<double>::
   computeFFT(buffer, synthFFT);
 
   double spectralDiff = 0.0;
-  for (size_t i = 0; i < fftSize; i++) {
+  for (size_t i = 1; i < fftSize; i++) {
     double synthNorm = std::sqrt(synthFFT[i][0] * synthFFT[i][0] + synthFFT[i][1] * synthFFT[i][1]);
-    double targetNorm = std::sqrt(targetFFT[i][0] * targetFFT[i][0] + targetFFT[i][1] * targetFFT[i][1]);
-    spectralDiff += std::abs(synthNorm - targetNorm);
+    spectralDiff += std::abs(synthNorm - targetMagnitude[i]);
   }
 
-  double timeDiff = 0.0;
-  for (size_t i = 0; i < fftSize; i++) {
+  /*double timeDiff = 0.0;
+  for (size_t i = 0; i < buffer[0].size(); i++) {
     timeDiff += std::abs(buffer[0][i] - targetSamples.samples[0][i]);
   }
 
@@ -73,8 +73,9 @@ double Wavefinder::calculateSpectralDistanceFromTarget(const AudioFile<double>::
     envelopeDiff += std::abs(synthEnergy[i] - targetEnergy[i]);
   }
 
-  double difference = spectralDiff + timeDiff * 0.5 + envelopeDiff * 0.5;
-  return (double)fftSize / (1.0 + difference);
+  double difference = spectralDiff + timeDiff * 0.75 + envelopeDiff * 0.5;
+  return (double)fftSize / (1.0 + difference);*/
+  return (double)fftSize / (1.0 + spectralDiff);
 }
 
 void Wavefinder::computeFFT(const AudioFile<double>::AudioBuffer& buffer, fftw_complex* output) {
@@ -105,14 +106,15 @@ void Wavefinder::initFFTW() {
   if (targetSamples.samples.empty()) {
     return;
   }
-  fftSize = targetSamples.samples[0].size();
+  fftSize = targetSamples.samples[0].size() / 2 + 1;
 
   freeFFTW();
 
   targetFFT = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * fftSize);
   synthFFT = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * fftSize);
+  targetMagnitude = (double*)malloc(sizeof(double) * fftSize);
 
-  if (!targetFFT || !synthFFT) {
+  if (!targetFFT || !synthFFT || !targetMagnitude) {
     freeFFTW();
     return;
   }
@@ -126,6 +128,7 @@ void Wavefinder::findTargetBaseFrequency() {
   size_t baseFrequencyIndex = 0;
   for (size_t i = 0; i < fftSize; i++) {
     double magnitude = std::sqrt(targetFFT[i][0] * targetFFT[i][0] + targetFFT[i][1] * targetFFT[i][1]);
+    targetMagnitude[i] = magnitude;
     if (magnitude > maxMagnitude) {
       maxMagnitude = magnitude;
       baseFrequencyIndex = i;
@@ -143,6 +146,10 @@ void Wavefinder::freeFFTW() {
   if (synthFFT) {
     fftw_free(synthFFT);
     synthFFT = nullptr;
+  }
+  if (targetMagnitude) {
+    free(targetMagnitude);
+    targetMagnitude = nullptr;
   }
 }
 

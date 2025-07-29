@@ -23,6 +23,7 @@ class Wavefinder {
     
     fftw_complex* targetFFT;
     fftw_complex* synthFFT;
+    double* targetMagnitude;
     size_t fftSize;
 
     std::function<std::unique_ptr<Individual>()>individualFactory;
@@ -57,6 +58,7 @@ class Wavefinder {
       mutationRate(mutRate),
       targetFFT(nullptr),
       synthFFT(nullptr),
+      targetMagnitude(nullptr),
       fftSize(0),
       individualFactory(factory) {
     initializePopulation();
