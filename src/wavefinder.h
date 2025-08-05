@@ -26,12 +26,16 @@ class Wavefinder {
     double* targetMagnitude;
     size_t fftSize;
 
+    std::vector<double> monoBuffer;
+    std::vector<double> targetEnergy;
+
     std::function<std::unique_ptr<Individual>()>individualFactory;
 
     void calculateFitness();
     double calculateSpectralDistanceFromTarget(const AudioFile<double>::AudioBuffer& buffer);
 
     void findTargetBaseFrequency();
+    void calulcateTargetEnergy();
     
     void initFFTW();
     void freeFFTW();
@@ -68,7 +72,7 @@ class Wavefinder {
     freeFFTW();
   }
 
-  Individual* find(const AudioFile<double> targetSamples);
+  Individual* find(const AudioFile<double> targetSamples, double samplesFrequency);
   
   Individual* getBestIndividual();
   double getBestFitness();

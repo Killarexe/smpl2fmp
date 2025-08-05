@@ -19,7 +19,7 @@ class Individual {
     virtual void printData() = 0;
     virtual void saveData() = 0;
 
-    virtual AudioFile<double>::AudioBuffer synthetize(double frequency, double duration, uint32_t sampleRate) = 0;
+    virtual void synthetize(double frequency, double duration, uint32_t sampleRate, AudioFile<double>::AudioBuffer& buffer) = 0;
 
     virtual std::unique_ptr<Individual> clone() const = 0;
     virtual ~Individual() = default;

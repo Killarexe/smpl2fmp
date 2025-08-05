@@ -36,6 +36,10 @@ int init(int argc, char **argv) {
   double mutate_rate = 0.2;
   app.add_option("-m,--mutate", mutate_rate, "Mutation rate on the mixing phase");
 
+  double sample_frequency = 0.0;
+  app.add_option("-f,--frequency", sample_frequency, "Set sample frequency (if the programs detects wrong)");
+
+
   CLI11_PARSE(app, argc, argv);
 
   if (argc < 2) {
@@ -63,7 +67,7 @@ int init(int argc, char **argv) {
   input_samples.load(input_filename);
 
   auto wavefinder = createWavefinder<OPN2Individual>(populations, generations, tournaments, mutate_rate, std::random_device{}());
-  Individual* result = wavefinder->find(input_samples);
+  Individual* result = wavefinder->find(input_samples, sample_frequency);
 
   std::cout << "Finished! Best fitness: " << result->fitness << "\nFM patch:" << std::endl;
   result->printData();

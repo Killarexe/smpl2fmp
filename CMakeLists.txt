@@ -18,5 +18,5 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ${FFTW_LIBRARIES})
 # Compile warnings
 target_compile_options(${PROJECT_NAME} PRIVATE
   $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
-  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Ofast -fno-stack-protector -march=native -Wpedantic>
+  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -O3 -march=native -ffast-math -DNDEBUG -fno-stack-protector -march=native -Wpedantic>
 )

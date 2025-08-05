@@ -159,13 +159,16 @@ void OPN2Individual::setPatch(ym3438_t* chip) {
   }
 }
 
-AudioFile<double>::AudioBuffer OPN2Individual::synthetize(double frequency, double duration, uint32_t sampleRate) {
+void OPN2Individual::synthetize(double frequency, double duration, uint32_t sampleRate, AudioFile<double>::AudioBuffer& buffer) {
   uint32_t totalSamples = (uint32_t)(duration * sampleRate);
 
-  AudioFile<double>::AudioBuffer result;
-  result.resize(2);
-  result[0].resize(totalSamples);
-  result[1].resize(totalSamples);
+  if (buffer.size() != 2) {
+    buffer.resize(2);
+  }
+  if (buffer[0].size() != totalSamples || buffer[1].size() != totalSamples) {
+    buffer[0].resize(totalSamples);
+    buffer[1].resize(totalSamples);
+  }
 
   ym3438_t chip;
   OPN2_Reset(&chip, sampleRate, CHIP_CLOCK);
@@ -196,23 +199,21 @@ AudioFile<double>::AudioBuffer OPN2Individual::synthetize(double frequency, doub
 
   int32_t* leftBuffer = (int32_t*)malloc(sizeof(int32_t) * totalSamples);
   int32_t* rightBuffer = (int32_t*)malloc(sizeof(int32_t) * totalSamples);
-  int32_t* buffer[2] = {leftBuffer, rightBuffer};
+  int32_t* outBuffer[2] = {leftBuffer, rightBuffer};
 
   writeChipRegister(&chip, 0x28, 0xF0 | CHANNEL);
 
-  OPN2_GenerateStream(&chip, buffer, totalSamples);
+  OPN2_GenerateStream(&chip, outBuffer, totalSamples);
 
   writeChipRegister(&chip, 0x28, 0x00 | CHANNEL);
 
   for (size_t i = 0; i < totalSamples; i++) {
-    result[0][i] = (double)buffer[0][i] / 16384.0; 
-    result[1][i] = (double)buffer[1][i] / 16384.0; 
+    buffer[0][i] = (double)outBuffer[0][i] / 16384.0; 
+    buffer[1][i] = (double)outBuffer[1][i] / 16384.0; 
   }
 
   free(leftBuffer);
   free(rightBuffer);
-
-  return result;
 }
 
 std::unique_ptr<Individual> OPN2Individual::clone() const {
