@@ -14,6 +14,23 @@ constexpr uint8_t CHANNEL = 0;
 constexpr double CHIP_CLOCK = 7670454.0;
 constexpr uint8_t OP_OFFSETS[4] = {0x30, 0x34, 0x38, 0x3C};
 
+double OPN2Individual::calculateDistance(const Individual* other) {
+  const OPN2Individual* castOther = dynamic_cast<const OPN2Individual*>(other);
+  constexpr size_t parametersSize = 944;
+  size_t diff = 0;
+  diff += std::abs(algorithm - castOther->algorithm);
+  diff += std::abs(feedback - castOther->feedback);
+  for (size_t i = 0; i < OPN2_OPERATOR_COUNT; i++) {
+    diff += std::abs(operators[i].multiple - castOther->operators[i].multiple);
+    diff += std::abs(operators[i].totalLevel - castOther->operators[i].totalLevel);
+    diff += std::abs(operators[i].attackRate - castOther->operators[i].attackRate);
+    diff += std::abs(operators[i].sustainLevel - castOther->operators[i].sustainLevel);
+    diff += std::abs(operators[i].decayRate - castOther->operators[i].decayRate);
+    diff += std::abs(operators[i].detune - castOther->operators[i].detune);
+  }
+  return (double)diff / (double)parametersSize;
+}
+
 std::unique_ptr<Individual> OPN2Individual::crossover(Individual* parent, std::mt19937& rng) {
   const OPN2Individual* castParent = dynamic_cast<OPN2Individual*>(parent);
 

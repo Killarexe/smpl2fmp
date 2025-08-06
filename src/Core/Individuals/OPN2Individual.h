@@ -24,6 +24,7 @@ class OPN2Individual : public Individual {
   public:
     OPN2Individual() = default;
 
+    double calculateDistance(const Individual* other) override;
     std::unique_ptr<Individual> crossover(Individual* parent, std::mt19937& rng) override;
     void mutate(double mutationRate, std::mt19937& rng) override;
     void randomize(std::mt19937& rng) override;

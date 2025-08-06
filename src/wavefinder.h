@@ -29,6 +29,9 @@ class Wavefinder {
     std::vector<double> monoBuffer;
     std::vector<double> targetEnergy;
 
+    double diversityThreshold;
+    double fitnessImprovementThreshold;
+
     std::function<std::unique_ptr<Individual>()>individualFactory;
 
     void calculateFitness();
@@ -41,9 +44,14 @@ class Wavefinder {
     void freeFFTW();
     void computeFFT(const AudioFile<double>::AudioBuffer& buffer, fftw_complex* output);
 
+    std::vector<size_t> getSortedIndiciesByFitness();
+    double calculatePopulationDiversity();
+    size_t rouletteWheelSelection();
     size_t tournamentSelection(size_t size);
-    void crossoverPopulation();
-    void mutatePopulation();
+    void crossoverPopulation(size_t generation);
+    void mutatePopulation(size_t generationsWithoutImprovement);
+    void insertRandomIndividuals();
+    void simulatedAnnealingStep(size_t generation);
   
   public:
     double targetFrequency;
@@ -64,6 +72,8 @@ class Wavefinder {
       synthFFT(nullptr),
       targetMagnitude(nullptr),
       fftSize(0),
+      diversityThreshold(0.1),
+      fitnessImprovementThreshold(0.001),
       individualFactory(factory) {
     initializePopulation();
   }

@@ -9,6 +9,7 @@
 #include <fftw3.h>
 #include <iostream>
 #include <memory>
+#include <numeric>
 #include <random>
 
 void Wavefinder::initializePopulation() {
@@ -59,11 +60,13 @@ double Wavefinder::calculateSpectralDistanceFromTarget(const AudioFile<double>::
     double synthNorm = std::sqrt(synthFFT[i][0] * synthFFT[i][0] + synthFFT[i][1] * synthFFT[i][1]);
     spectralDiff += std::abs(synthNorm - targetMagnitude[i]);
   }
+  double spectralScore  = (double)fftSize / (1.0 + spectralDiff);
 
   double timeDiff = 0.0;
   for (size_t i = 0; i < buffer[0].size(); i++) {
     timeDiff += std::abs(buffer[0][i] - targetSamples.samples[0][i]);
   }
+  timeDiff /= buffer[0].size();
 
   double envelopeDiff = 0.0;
   if (!targetEnergy.empty()) {
@@ -80,9 +83,10 @@ double Wavefinder::calculateSpectralDistanceFromTarget(const AudioFile<double>::
       envelopeDiff += std::abs(synthEnergy - targetEnergy[w]);
     }
   }
+  envelopeDiff /= targetEnergy.size();
 
-  double difference = spectralDiff + timeDiff * 0.5 + envelopeDiff * 0.5;
-  return (double)fftSize / (1.0 + difference);
+  double fitness = spectralScore * 0.5 + (1.0 - timeDiff) * 0.4 + (1.0 - envelopeDiff) * 0.1;
+  return fitness;
 }
 
 void Wavefinder::computeFFT(const AudioFile<double>::AudioBuffer& buffer, fftw_complex* output) {
@@ -185,10 +189,11 @@ void Wavefinder::freeFFTW() {
 }
 
 size_t Wavefinder::tournamentSelection(size_t tournamentSize) {
+  size_t eliteCount = std::min(populationSize / 20, static_cast<size_t>(5));
   std::uniform_int_distribution<size_t> dis(0, population.size() - 1);
   size_t bestIndex = dis(rng);
   double bestFitness = population[bestIndex]->fitness;
-  for (size_t i = 1; i < tournamentSize; i++) {
+  for (size_t i = eliteCount; i < tournamentSize; i++) {
     size_t contestantIndex = dis(rng);
     double contestantFitness = population[contestantIndex]->fitness;
     if (bestFitness < contestantFitness) {
@@ -199,31 +204,137 @@ size_t Wavefinder::tournamentSelection(size_t tournamentSize) {
   return bestIndex;
 }
 
-void Wavefinder::crossoverPopulation() {
+size_t Wavefinder::rouletteWheelSelection()  {
+  double totalFitness = 0.0;
+  double minFitness = std::numeric_limits<double>::max();
+  for (const auto& individual : population) {
+    minFitness = std::min(minFitness, individual->fitness);
+  }
+  for (const auto& individual : population) {
+    totalFitness += individual->fitness - minFitness + 1.0;
+  }
+  if (totalFitness <= 0.0) {
+    std::uniform_int_distribution<size_t> dis(0, populationSize - 1);
+    return dis(rng);
+  }
+  std::uniform_real_distribution<double> dis(0.0, totalFitness);
+  double pick = dis(rng);
+  double current = 0.0;
+  for (size_t i = 0; i < populationSize; i++) {
+    current += population[i]->fitness - minFitness + 1.0;
+    if (current >= pick) {
+      return i;
+    }
+  }
+  return populationSize - 1;
+}
+
+std::vector<size_t> Wavefinder::getSortedIndiciesByFitness() {
+  std::vector<size_t> indicies(populationSize);
+  std::iota(indicies.begin(), indicies.end(), 0);
+  std::sort(indicies.begin(), indicies.end(),
+    [this](size_t a, size_t b) {
+      return population[a]->fitness > population[b]->fitness;
+    });
+  return indicies;
+}
+
+double Wavefinder::calculatePopulationDiversity() {
+  if (populationSize < 2) {
+    return 1.0;
+  }
+  
+  double totalDistance = 0.0;
+  size_t comparaisons = 0;
+  size_t sampleSize = std::min(populationSize, static_cast<size_t>(20));
+  std::uniform_int_distribution<size_t> dis(0, populationSize - 1);
+  for (size_t i = 0; i < sampleSize; i++) {
+    for (size_t j = i + 1; j < sampleSize; j++) {
+      size_t index1 = dis(rng);
+      size_t index2 = dis(rng);
+      if (index1 != index2) {
+        double dist = population[index1]->calculateDistance(population[index2].get());
+        totalDistance += dist;
+        comparaisons++;
+      }
+    }
+  }
+  return comparaisons > 0 ? totalDistance / comparaisons : 0.0;
+}
+
+void Wavefinder::insertRandomIndividuals() {
+  std::vector<size_t> sortedIndicies = getSortedIndiciesByFitness();
+  size_t replaceCount = populationSize / 10;
+  for (size_t i = 0; i < replaceCount; i++) {
+    size_t worstIndex = sortedIndicies[populationSize - 1 - i];
+    std::unique_ptr<Individual> newIndividual = individualFactory();
+    newIndividual->randomize(rng);
+    population[worstIndex] = std::move(newIndividual);
+  }
+}
+
+void Wavefinder::simulatedAnnealingStep(size_t generation) {
+  double temperature = 1.0 - (double)generation / maxGenerations;
+  for (size_t i = 0; i < populationSize / 10; i++) {
+    std::uniform_int_distribution<size_t> dis(0, populationSize);
+    size_t index = dis(rng);
+
+    std::unique_ptr<Individual> candidate = population[index]->clone();
+    candidate->mutate(mutationRate * 3.0, rng);
+
+    AudioFile<double>::AudioBuffer synthesized;
+    candidate->synthetize(targetFrequency, targetSamples.getLengthInSeconds(), targetSamples.getSampleRate(), synthesized);
+    candidate->fitness = calculateSpectralDistanceFromTarget(synthesized);
+
+    double fitnessDiff = candidate->fitness - population[index]->fitness;
+    if (fitnessDiff > 0 || (temperature > 0 && std::exp(fitnessDiff / temperature) > std::uniform_real_distribution<double>(0.0, 1.0)(rng))) {
+      population[index] = std::move(candidate);
+    }
+  }
+}
+
+void Wavefinder::crossoverPopulation(size_t generation) {
   std::uniform_int_distribution<size_t> parentDist(0, population.size() - 1);
   std::vector<std::unique_ptr<Individual>> newPopulation;
   newPopulation.reserve(populationSize);
-  newPopulation.push_back(getBestIndividual()->clone());
 
-  std::vector<size_t> parentIndices;
-  parentIndices.reserve((populationSize - 1) * 2);
-  
-  for (size_t i = 1; i < populationSize; i++) {
-    parentIndices.push_back(tournamentSelection(tournamentSize));
-    parentIndices.push_back(tournamentSelection(tournamentSize));
+  std::vector<size_t> sortedIndicies = getSortedIndiciesByFitness();
+  size_t eliteCount = std::min(populationSize / 20, static_cast<size_t>(5));
+
+  for (size_t i = 0; i < eliteCount; i++) {
+    newPopulation.push_back(population[sortedIndicies[i]]->clone());
   }
 
-  for (size_t i = 0; i < parentIndices.size(); i += 2) {
-    auto child = population[parentIndices[i]]->crossover(population[parentIndices[i+1]].get(), rng);
+  while (newPopulation.size() < populationSize) {
+    size_t parent1Index, parent2Index;
+    if (generation % 10 < 3) {
+      parent1Index = rouletteWheelSelection();
+      parent2Index = rouletteWheelSelection();
+    } else {
+      parent1Index = tournamentSelection(tournamentSize);
+      parent2Index = tournamentSelection(tournamentSize);
+    }
+    std::unique_ptr<Individual> child = population[parent1Index]->crossover(population[parent2Index].get(), rng);
     newPopulation.push_back(std::move(child));
   }
 
   population = std::move(newPopulation);
 }
 
-void Wavefinder::mutatePopulation() {
-  for (size_t i = 1; i < population.size(); i++) {
-    population[i]->mutate(mutationRate, rng);
+void Wavefinder::mutatePopulation(size_t generationsWithoutImprovement) {
+  double currentDiversity = calculatePopulationDiversity();
+  double adaptiveMutationRate = mutationRate;
+  if (currentDiversity < diversityThreshold) {
+    adaptiveMutationRate *= 3.0;
+  }
+
+  size_t eliteCount = std::min(populationSize / 20, static_cast<size_t>(5));
+  for (size_t i = eliteCount; i < population.size(); i++) {
+    double individualMutationRate = adaptiveMutationRate;
+    if (generationsWithoutImprovement > 20 && i % 10 == 0) {
+      individualMutationRate *= 5.0;
+    }
+    population[i]->mutate(individualMutationRate, rng);
   }
 }
 
@@ -254,13 +365,32 @@ Individual* Wavefinder::find(const AudioFile<double> targetSamples, double sampl
     std::cout << "Target frequency forced to: " << samplesFrequency << "Hz!" << std::endl;
   }
 
+  size_t generationsWithoutImprovement = 0;
+  double lastBestFintness = 0.0;
+
   for (size_t generation = 0; generation < maxGenerations; generation++) {
     calculateFitness();
 
-    std::cout << "Generation n°" << generation << ": Best fitness => " << getBestFitness() << std::endl;
+    double currentBestFitness = getBestFitness();
+    if (currentBestFitness > lastBestFintness + fitnessImprovementThreshold) {
+      generationsWithoutImprovement = 0;
+      lastBestFintness = currentBestFitness;
+    } else {
+      generationsWithoutImprovement++;
+    }
 
-    crossoverPopulation();
-    mutatePopulation();
+    std::cout << "Generation n°" << generation << ": Best fitness => " << currentBestFitness << std::endl;
+
+    if (generationsWithoutImprovement > 30) {
+      insertRandomIndividuals();
+      generationsWithoutImprovement = 0;
+    }
+
+    crossoverPopulation(generation);
+    mutatePopulation(generationsWithoutImprovement);
+    if (generation % 50 == 49) {
+      simulatedAnnealingStep(generation);
+    }
   }
 
   calculateFitness();
