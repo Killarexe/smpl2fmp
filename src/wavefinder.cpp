@@ -1,8 +1,10 @@
 #include "wavefinder.h"
 #include "AudioFile/AudioFile.h"
 #include "Core/individual.h"
+#include "fftprocessor.h"
 #include <algorithm>
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -25,120 +27,59 @@ void Wavefinder::initializePopulation() {
 
 void Wavefinder::setTarget(const AudioFile<double> target) {
   targetSamples = target;
-  initFFTW();
+  findTargetBaseFrequency();
+  calulcateTargetEnergy();
 }
 
-void Wavefinder::calculateFitness() {
-  static thread_local AudioFile<double>::AudioBuffer buffer;
-  for (auto& individual : population) {
-    individual->synthetize(targetFrequency, targetSamples.getLengthInSeconds(), targetSamples.getSampleRate(), buffer);
-    individual->fitness = calculateSpectralDistanceFromTarget(buffer);
+void Wavefinder::calculateFitness(FFTProcessor& fft) {
+  for (size_t i = 0; i < populationSize; i++) {
+    population[i]->synthetize(targetFrequency, targetSamples.getLengthInSeconds(), targetSamples.getSampleRate(), fft.getInput(i));
+  }
+  fft.execute();
+  for (size_t i = 0; i < populationSize; i++) {
+    population[i]->fitness = calculateSpectralDistanceFromTarget(fft.getInput(i), fft.getMagnitude(i));
   }
 }
 
-double Wavefinder::calculateSpectralDistanceFromTarget(const AudioFile<double>::AudioBuffer& buffer) {
-  if (buffer.empty() || targetSamples.samples.empty()) {
+double Wavefinder::calculateSpectralDistanceFromTarget(const double* samples, const std::vector<double>& magnitudes) {
+  if (targetSamples.samples.empty()) {
     return 1.0;
   }
 
-  computeFFT(buffer, synthFFT);
+  const size_t sampleSize = targetSamples.samples[0].size(); 
 
   double spectralDiff = 0.0;
-  size_t i = 1;
-  for (; i + 3 < fftSize; i += 4) {
-    double synthNorm1 = std::sqrt(synthFFT[i][0] * synthFFT[i][0] + synthFFT[i][1] * synthFFT[i][1]);
-    double synthNorm2 = std::sqrt(synthFFT[i+1][0] * synthFFT[i+1][0] + synthFFT[i+1][1] * synthFFT[i+1][1]);
-    double synthNorm3 = std::sqrt(synthFFT[i+2][0] * synthFFT[i+2][0] + synthFFT[i+2][1] * synthFFT[i+2][1]);
-    double synthNorm4 = std::sqrt(synthFFT[i+3][0] * synthFFT[i+3][0] + synthFFT[i+3][1] * synthFFT[i+3][1]);
-    
-    spectralDiff += std::abs(synthNorm1 - targetMagnitude[i]) + 
-                    std::abs(synthNorm2 - targetMagnitude[i+1]) +
-                    std::abs(synthNorm3 - targetMagnitude[i+2]) + 
-                    std::abs(synthNorm4 - targetMagnitude[i+3]);
+  size_t i;
+  for (i = 1; i < magnitudes.size(); i++) {
+    spectralDiff += std::abs(magnitudes[i] - targetMagnitude[i]);
   }
-  for (; i < fftSize; i++) {
-    double synthNorm = std::sqrt(synthFFT[i][0] * synthFFT[i][0] + synthFFT[i][1] * synthFFT[i][1]);
-    spectralDiff += std::abs(synthNorm - targetMagnitude[i]);
-  }
-  double spectralScore  = (double)fftSize / (1.0 + spectralDiff);
+  double spectralScore = (double)magnitudes.size() / (1.0 + spectralDiff);
 
   double timeDiff = 0.0;
-  for (size_t i = 0; i < buffer[0].size(); i++) {
-    timeDiff += std::abs(buffer[0][i] - targetSamples.samples[0][i]);
+  for (size_t i = 0; i < sampleSize; i++) {
+    timeDiff += std::abs(samples[i] - targetSamples.samples[0][i]);
   }
-  timeDiff /= buffer[0].size();
+  timeDiff /= sampleSize;
 
   double envelopeDiff = 0.0;
   if (!targetEnergy.empty()) {
-    const size_t windowSize = buffer[0].size() / 10;
+    const size_t windowSize = sampleSize / 10;
     for (size_t w = 0; w < 10; w++) {
       size_t start = w * windowSize;
-      size_t end = std::min(start + windowSize, buffer[0].size());
+      size_t end = std::min(start + windowSize, sampleSize);
 
       double synthRMS = 0.0;
       for (size_t i = start; i < end; i++) {
-        synthRMS += buffer[0][i] * buffer[0][i];
+        synthRMS += samples[i] * samples[i];
       }
+
       double synthEnergy = std::sqrt(synthRMS / (end - start));
       envelopeDiff += std::abs(synthEnergy - targetEnergy[w]);
     }
-  }
-  envelopeDiff /= targetEnergy.size();
-
-  double fitness = spectralScore * 0.5 + (1.0 - timeDiff) * 0.4 + (1.0 - envelopeDiff) * 0.1;
-  return fitness;
-}
-
-void Wavefinder::computeFFT(const AudioFile<double>::AudioBuffer& buffer, fftw_complex* output) {
-    if (buffer.empty() || !output) {
-    return;
-  }
-  
-  size_t bufferSize = buffer[0].size();
-  if (monoBuffer.size() != bufferSize) {
-    monoBuffer.resize(bufferSize);
-  }
-  std::fill(monoBuffer.begin(), monoBuffer.end(), 0.0);
-
-  std::vector<double> monoBuffer(bufferSize, 0.0);
-  for (size_t channel = 0; channel < buffer.size(); channel++) {
-    for (size_t i = 0; i < bufferSize && i < buffer[channel].size(); i++) {
-      monoBuffer[i] += buffer[channel][i];
-    }
+    envelopeDiff /= targetEnergy.size();
   }
 
-  if (buffer.size() > 1) {
-    for (double& sample : monoBuffer) {
-      sample /= buffer.size();
-    }
-  }
-
-  fftw_plan plan = fftw_plan_dft_r2c_1d(bufferSize, monoBuffer.data(), output, FFTW_ESTIMATE);
-  fftw_execute(plan);
-  fftw_destroy_plan(plan);
-}
-
-void Wavefinder::initFFTW() {
-  if (targetSamples.samples.empty()) {
-    return;
-  }
-  fftSize = targetSamples.samples[0].size() / 2 + 1;
-
-  freeFFTW();
-
-  targetFFT = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * fftSize);
-  synthFFT = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * fftSize);
-  targetMagnitude = (double*)malloc(sizeof(double) * fftSize);
-
-  if (!targetFFT || !synthFFT || !targetMagnitude) {
-    freeFFTW();
-    return;
-  }
-
-  monoBuffer.reserve(targetSamples.samples[0].size());
-  computeFFT(targetSamples.samples, targetFFT);
-  findTargetBaseFrequency();
-  calulcateTargetEnergy();
+  return spectralScore * 0.5 + (1.0 - timeDiff) * 0.4 + (1.0 - envelopeDiff) * 0.1;
 }
 
 void Wavefinder::calulcateTargetEnergy() {
@@ -159,33 +100,39 @@ void Wavefinder::calulcateTargetEnergy() {
 }
 
 void Wavefinder::findTargetBaseFrequency() {
+  size_t sampleSize = targetSamples.samples[0].size();
+  size_t fftSize = sampleSize / 2 + 1;
+  fftw_complex* result = fftw_alloc_complex(fftSize);
+  fftw_plan plan = fftw_plan_dft_r2c_1d(sampleSize, targetSamples.samples[0].data(), result, FFTW_ESTIMATE);
+
+  fftw_execute(plan);
+
+  targetSpectrum.clear();
+  targetSpectrum.reserve(fftSize);
+  targetMagnitude.clear();
+  targetMagnitude.reserve(fftSize);
+
   double maxMagnitude = 0.0;
   size_t baseFrequencyIndex = 0;
+
   for (size_t i = 0; i < fftSize; i++) {
-    double magnitude = std::sqrt(targetFFT[i][0] * targetFFT[i][0] + targetFFT[i][1] * targetFFT[i][1]);
-    targetMagnitude[i] = magnitude;
+    std::complex<double> complex = std::complex(result[i][0], result[i][1]);
+    double magnitude = std::abs(complex);
+    
+    targetSpectrum.push_back(complex);
+    targetMagnitude.push_back(magnitude);
+
     if (magnitude > maxMagnitude) {
       maxMagnitude = magnitude;
       baseFrequencyIndex = i;
     }
   }
+
+  fftw_destroy_plan(plan);
+  fftw_free(result);
+
   targetFrequency = (double)baseFrequencyIndex * ((double)targetSamples.getSampleRate() / (double)targetSamples.samples[0].size());
   std::cout << "Found base frequency: " << targetFrequency << std::endl;
-}
-
-void Wavefinder::freeFFTW() {
-  if (targetFFT) {
-    fftw_free(targetFFT);
-    targetFFT = nullptr;
-  }
-  if (synthFFT) {
-    fftw_free(synthFFT);
-    synthFFT = nullptr;
-  }
-  if (targetMagnitude) {
-    free(targetMagnitude);
-    targetMagnitude = nullptr;
-  }
 }
 
 size_t Wavefinder::tournamentSelection(size_t tournamentSize) {
@@ -274,6 +221,11 @@ void Wavefinder::insertRandomIndividuals() {
 }
 
 void Wavefinder::simulatedAnnealingStep(size_t generation) {
+  const size_t sampleSize = targetSamples.samples[0].size();
+  const size_t fftSize = sampleSize / 2 + 1;
+  double* synthesized = (double*)malloc(sizeof(double) * sampleSize);
+  fftw_complex* result = fftw_alloc_complex(fftSize);
+  fftw_plan plan = fftw_plan_dft_r2c_1d(sampleSize, synthesized, result, FFTW_ESTIMATE);
   double temperature = 1.0 - (double)generation / maxGenerations;
   for (size_t i = 0; i < populationSize / 10; i++) {
     std::uniform_int_distribution<size_t> dis(0, populationSize);
@@ -282,15 +234,28 @@ void Wavefinder::simulatedAnnealingStep(size_t generation) {
     std::unique_ptr<Individual> candidate = population[index]->clone();
     candidate->mutate(mutationRate * 3.0, rng);
 
-    AudioFile<double>::AudioBuffer synthesized;
     candidate->synthetize(targetFrequency, targetSamples.getLengthInSeconds(), targetSamples.getSampleRate(), synthesized);
-    candidate->fitness = calculateSpectralDistanceFromTarget(synthesized);
+
+    fftw_execute(plan);
+
+    std::vector<double> magnitudes;
+    magnitudes.reserve(fftSize);
+
+    for (size_t j = 0; j < fftSize; j++) {
+      magnitudes.push_back(std::sqrt(result[i][0] * result[i][0] + result[i][1] * result[i][1]));
+    }
+      
+    candidate->fitness = calculateSpectralDistanceFromTarget(synthesized, magnitudes);
 
     double fitnessDiff = candidate->fitness - population[index]->fitness;
     if (fitnessDiff > 0 || (temperature > 0 && std::exp(fitnessDiff / temperature) > std::uniform_real_distribution<double>(0.0, 1.0)(rng))) {
       population[index] = std::move(candidate);
     }
   }
+
+  fftw_free(result);
+  free(synthesized);
+  fftw_destroy_plan(plan);
 }
 
 void Wavefinder::crossoverPopulation(size_t generation) {
@@ -365,11 +330,13 @@ Individual* Wavefinder::find(const AudioFile<double> targetSamples, double sampl
     std::cout << "Target frequency forced to: " << samplesFrequency << "Hz!" << std::endl;
   }
 
+  FFTProcessor fft(targetSamples.samples[0].size(), populationSize);
+
   size_t generationsWithoutImprovement = 0;
   double lastBestFintness = 0.0;
 
   for (size_t generation = 0; generation < maxGenerations; generation++) {
-    calculateFitness();
+    calculateFitness(fft);
 
     double currentBestFitness = getBestFitness();
     if (currentBestFitness > lastBestFintness + fitnessImprovementThreshold) {
@@ -393,6 +360,6 @@ Individual* Wavefinder::find(const AudioFile<double> targetSamples, double sampl
     }
   }
 
-  calculateFitness();
+  calculateFitness(fft);
   return getBestIndividual();
 }

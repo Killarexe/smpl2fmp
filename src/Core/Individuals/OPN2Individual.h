@@ -32,7 +32,7 @@ class OPN2Individual : public Individual {
     void printData() override;
     void saveData() override;
 
-    void synthetize(double frequency, double duration, uint32_t sampleRate, AudioFile<double>::AudioBuffer& buffer) override;
+    void synthetize(double frequency, double duration, uint32_t sampleRate, double* buffer) override;
 
     std::unique_ptr<Individual> clone() const override;
 

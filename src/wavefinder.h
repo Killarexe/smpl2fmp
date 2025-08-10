@@ -2,6 +2,8 @@
 
 #include "AudioFile/AudioFile.h"
 #include "Core/individual.h"
+#include "fftprocessor.h"
+#include <complex>
 #include <cstddef>
 #include <fftw3.h>
 #include <functional>
@@ -21,29 +23,23 @@ class Wavefinder {
 
     AudioFile<double>targetSamples;
     
-    fftw_complex* targetFFT;
-    fftw_complex* synthFFT;
-    double* targetMagnitude;
-    size_t fftSize;
-
-    std::vector<double> monoBuffer;
+    std::vector<std::complex<double>> targetSpectrum;
+    std::vector<double> targetMagnitude;
     std::vector<double> targetEnergy;
+
+    std::vector<double> audioBuffer;
 
     double diversityThreshold;
     double fitnessImprovementThreshold;
 
-    std::function<std::unique_ptr<Individual>()>individualFactory;
+    std::function<std::unique_ptr<Individual>()> individualFactory;
 
-    void calculateFitness();
-    double calculateSpectralDistanceFromTarget(const AudioFile<double>::AudioBuffer& buffer);
+    void calculateFitness(FFTProcessor& fft);
+    double calculateSpectralDistanceFromTarget(const double* samples, const std::vector<double>& magnitudes);
 
     void findTargetBaseFrequency();
     void calulcateTargetEnergy();
     
-    void initFFTW();
-    void freeFFTW();
-    void computeFFT(const AudioFile<double>::AudioBuffer& buffer, fftw_complex* output);
-
     std::vector<size_t> getSortedIndiciesByFitness();
     double calculatePopulationDiversity();
     size_t rouletteWheelSelection();
@@ -68,19 +64,13 @@ class Wavefinder {
       maxGenerations(genSize),
       tournamentSize(turSize),
       mutationRate(mutRate),
-      targetFFT(nullptr),
-      synthFFT(nullptr),
-      targetMagnitude(nullptr),
-      fftSize(0),
       diversityThreshold(0.1),
       fitnessImprovementThreshold(0.001),
       individualFactory(factory) {
     initializePopulation();
   }
 
-  ~Wavefinder() {
-    freeFFTW();
-  }
+  ~Wavefinder() {}
 
   Individual* find(const AudioFile<double> targetSamples, double samplesFrequency);
   
