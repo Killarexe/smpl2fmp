@@ -55,7 +55,7 @@ double Wavefinder::calculateSpectralDistanceFromTarget(const double* samples, co
   }
   double spectralScore = (double)magnitudes.size() / (1.0 + spectralDiff);
 
-  double timeDiff = 0.0;
+  /*double timeDiff = 0.0;
   for (size_t i = 0; i < sampleSize; i++) {
     timeDiff += std::abs(samples[i] - targetSamples.samples[0][i]);
   }
@@ -77,9 +77,9 @@ double Wavefinder::calculateSpectralDistanceFromTarget(const double* samples, co
       envelopeDiff += std::abs(synthEnergy - targetEnergy[w]);
     }
     envelopeDiff /= targetEnergy.size();
-  }
+  }*/
 
-  return spectralScore * 0.5 + (1.0 - timeDiff) * 0.4 + (1.0 - envelopeDiff) * 0.1;
+  return spectralScore;
 }
 
 void Wavefinder::calulcateTargetEnergy() {
@@ -355,9 +355,9 @@ Individual* Wavefinder::find(const AudioFile<double> targetSamples, double sampl
 
     crossoverPopulation(generation);
     mutatePopulation(generationsWithoutImprovement);
-    if (generation % 50 == 49) {
-      simulatedAnnealingStep(generation);
-    }
+    //if (generation % 50 == 49) {
+    //  simulatedAnnealingStep(generation);
+    //}
   }
 
   calculateFitness(fft);
