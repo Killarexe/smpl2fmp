@@ -1,7 +1,8 @@
 #include "wavefinder.h"
-#include "AudioFile/AudioFile.h"
+#include <AudioFile.h>
 #include "Core/individual.h"
 #include "fftprocessor.h"
+#include "pgbar/pgbar.hpp"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -13,6 +14,8 @@
 #include <memory>
 #include <numeric>
 #include <random>
+#include <sstream>
+#include <omp.h>
 
 void Wavefinder::initializePopulation() {
   population.clear();
@@ -32,13 +35,23 @@ void Wavefinder::setTarget(const AudioFile<double> target) {
 }
 
 void Wavefinder::calculateFitness(FFTProcessor& fft) {
+  #pragma omp parallel for schedule(dynamic)
   for (size_t i = 0; i < populationSize; i++) {
     population[i]->synthetize(targetFrequency, targetSamples.getLengthInSeconds(), targetSamples.getSampleRate(), fft.getInput(i));
+    #pragma omp critical
+    {
+      progressBars.tick<1>();
+    }
   }
+
   fft.execute();
+
+  #pragma omp parallel for
   for (size_t i = 0; i < populationSize; i++) {
     population[i]->fitness = calculateSpectralDistanceFromTarget(fft.getInput(i), fft.getMagnitude(i));
   }
+  
+  progressBars.reset<1>();
 }
 
 double Wavefinder::calculateSpectralDistanceFromTarget(const double* samples, const std::vector<double>& magnitudes) {
@@ -335,6 +348,25 @@ Individual* Wavefinder::find(const AudioFile<double> targetSamples, double sampl
   size_t generationsWithoutImprovement = 0;
   double lastBestFintness = 0.0;
 
+  progressBars.config<0>().tasks(maxGenerations);
+  progressBars.config<0>().style(
+    pgbar::config::Line::Sped |
+    pgbar::config::Line::Elpsd |
+    pgbar::config::Line::Cntdwn |
+    pgbar::config::Line::Entire
+  );
+  progressBars.config<0>().speed_unit({"Gen/s"});
+  progressBars.tick_to<0>(0);
+
+  progressBars.config<1>().tasks(populationSize);
+  progressBars.config<1>().style(
+    pgbar::config::Line::Sped |
+    pgbar::config::Line::Elpsd |
+    pgbar::config::Line::Cntdwn |
+    pgbar::config::Line::Entire
+  );
+  progressBars.config<1>().speed_unit({"Pop/s"});
+
   for (size_t generation = 0; generation < maxGenerations; generation++) {
     calculateFitness(fft);
 
@@ -346,8 +378,6 @@ Individual* Wavefinder::find(const AudioFile<double> targetSamples, double sampl
       generationsWithoutImprovement++;
     }
 
-    std::cout << "Generation n°" << generation << ": Best fitness => " << currentBestFitness << std::endl;
-
     if (generationsWithoutImprovement > 30) {
       insertRandomIndividuals();
       generationsWithoutImprovement = 0;
@@ -358,6 +388,11 @@ Individual* Wavefinder::find(const AudioFile<double> targetSamples, double sampl
     //if (generation % 50 == 49) {
     //  simulatedAnnealingStep(generation);
     //}
+
+    std::ostringstream stream;
+    stream << "Best fitness: " << currentBestFitness;
+    progressBars.config<0>().postfix(stream.str());
+    progressBars.tick<0>();
   }
 
   calculateFitness(fft);

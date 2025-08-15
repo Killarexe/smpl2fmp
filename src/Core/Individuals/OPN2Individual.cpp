@@ -1,5 +1,5 @@
 #include "OPN2Individual.h"
-#include "AudioFile/AudioFile.h"
+#include <AudioFile.h>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -13,6 +13,63 @@
 constexpr uint8_t CHANNEL = 0;
 constexpr double CHIP_CLOCK = 7670454.0;
 constexpr uint8_t OP_OFFSETS[4] = {0x30, 0x34, 0x38, 0x3C};
+
+OPN2Operator OPN2Operator::crossover(const OPN2Operator& parent, std::mt19937& rng) {
+  OPN2Operator child = *this;
+  std::uniform_real_distribution<double> dis(0.0, 1.0);
+
+  if (dis(rng) < 0.5) {
+    child.multiple = parent.multiple;
+  }
+  if (dis(rng) < 0.5) {
+    child.totalLevel = parent.totalLevel;
+  }
+  if (dis(rng) < 0.5) {
+    child.attackRate = parent.attackRate;
+  }
+  if (dis(rng) < 0.5) {
+    child.sustainLevel = parent.sustainLevel;
+  }
+  if (dis(rng) < 0.5) {
+    child.decayRate = parent.decayRate;
+  }
+  if (dis(rng) < 0.5) {
+    child.detune = parent.detune;
+  }
+  if (dis(rng) < 0.5) {
+    child.amplitudeModulation = parent.amplitudeModulation;
+  }
+
+  return child;
+}
+
+void OPN2Operator::mutate(double mutationRate, std::mt19937& rng) {
+  std::uniform_real_distribution<double> mut_dis(0.0, 1.0);
+  std::uniform_int_distribution<uint8_t> first_dis(0, 7);
+  std::uniform_int_distribution<uint8_t> second_dis(0, 15);
+  std::uniform_int_distribution<uint8_t> third_dis(0, 31);
+  std::uniform_int_distribution<uint8_t> forth_dis(0, 127);
+
+  if (mut_dis(rng) < mutationRate) {
+    multiple = second_dis(rng);
+  }
+  if (mut_dis(rng) < mutationRate) {
+    totalLevel = forth_dis(rng);
+  }
+  if (mut_dis(rng) < mutationRate) {
+    attackRate = third_dis(rng);
+  }
+  if (mut_dis(rng) < mutationRate) {
+    decayRate = third_dis(rng);
+  }
+  if (mut_dis(rng) < mutationRate) {
+    sustainLevel = second_dis(rng);
+  }
+  if (mut_dis(rng) < mutationRate) {
+    detune = first_dis(rng);
+  }
+  amplitudeModulation = mut_dis(rng) < mutationRate;
+}
 
 double OPN2Individual::calculateDistance(const Individual* other) {
   const OPN2Individual* castOther = dynamic_cast<const OPN2Individual*>(other);
@@ -39,10 +96,12 @@ std::unique_ptr<Individual> OPN2Individual::crossover(Individual* parent, std::m
   std::uniform_real_distribution<double> dis(0.0, 1.0);
 
   for (size_t i = 0; i < OPN2_OPERATOR_COUNT; i++) {
-    if (dis(rng) < 0.5) {
+    if (dis(rng) < 0.25) {
       child.operators[i] = this->operators[i];
-    } else {
+    } else if (dis(rng) < 0.25) {
       child.operators[i] = castParent->operators[i];
+    } else {
+      child.operators[i] = this->operators[i].crossover(castParent->operators[i], rng);
     }
   }
 
@@ -64,35 +123,20 @@ std::unique_ptr<Individual> OPN2Individual::crossover(Individual* parent, std::m
 void OPN2Individual::mutate(double mutationRate, std::mt19937& rng) {
   std::uniform_real_distribution<double> mut_dis(0.0, 1.0);
   std::uniform_int_distribution<uint8_t> first_dis(0, 7);
-  std::uniform_int_distribution<uint8_t> second_dis(0, 15);
-  std::uniform_int_distribution<uint8_t> third_dis(0, 31);
-  std::uniform_int_distribution<uint8_t> forth_dis(0, 127);
+  std::uniform_int_distribution<uint8_t> am_dis(0, 3);
 
   for (size_t i = 0; i < OPN2_OPERATOR_COUNT; i++) {
-    if (mut_dis(rng) < mutationRate) {
-      this->operators[i].multiple = second_dis(rng);
-    }
-    if (mut_dis(rng) < mutationRate) {
-      this->operators[i].totalLevel = forth_dis(rng);
-    }
-    if (mut_dis(rng) < mutationRate) {
-      this->operators[i].attackRate = third_dis(rng);
-    }
-    if (mut_dis(rng) < mutationRate) {
-      this->operators[i].decayRate = third_dis(rng);
-    }
-    if (mut_dis(rng) < mutationRate) {
-      this->operators[i].sustainLevel = second_dis(rng);
-    }
-    if (mut_dis(rng) < mutationRate) {
-      this->operators[i].detune = first_dis(rng);
-    }
+    this->operators[i].mutate(mutationRate, rng);
   }
+
   if (mut_dis(rng) < mutationRate) {
     this->algorithm = first_dis(rng);
   }
   if (mut_dis(rng) < mutationRate) {
     this->feedback = first_dis(rng);
+  }
+  if (mut_dis(rng) < mutationRate) {
+    this->amplitudeModulationSensitivity = am_dis(rng);
   }
 }
 
@@ -101,16 +145,21 @@ void OPN2Individual::randomize(std::mt19937& rng) {
 }
 
 void OPN2Individual::printData() {
-  std::cout << "Algorithm: " << (int)algorithm << "\nFeedback: " << (int)feedback << std::endl;
+  std::cout <<
+    "Algorithm: " << (int)algorithm <<
+    "\nFeedback: " << (int)feedback <<
+    "\nAMS: " << (int)amplitudeModulationSensitivity <<
+  std::endl;
   for (size_t index = 0; index < OPN2_OPERATOR_COUNT; index++) {
     OPN2Operator op = operators[index];
     std::cout << "Operator n°" << index + 1 << std::endl;
     std::cout << "Multiple: " << (int)op.multiple << std::endl;
+    std::cout << "Detune: " << (int)op.detune - 3 << std::endl;
     std::cout << "Total level: " << (int)op.totalLevel << std::endl;
+    std::cout << "AM enabled: " << op.amplitudeModulation << std::endl;
     std::cout << "Attack rate: " << (int)op.attackRate << std::endl;
     std::cout << "Decay rate: " << (int)op.decayRate<< std::endl;
-    std::cout << "Detune: " << (int)op.detune - 3 << std::endl;
-    std::cout << "Sustain level: " << (int)op.sustainLevel << "\n" <<std::endl;
+    std::cout << "Sustain level: " << (int)op.sustainLevel << std::endl;
   }
 }
 
@@ -154,17 +203,17 @@ static void writeChipRegister(ym3438_t* chip, uint8_t address, uint8_t data) {
 }
 
 void OPN2Individual::setPatch(ym3438_t* chip) {
-  unsigned char algorithmFeedback = (feedback << 3) | algorithm;
+  uint8_t algorithmFeedback = (feedback << 3) | algorithm;
   writeChipRegister(chip, 0xB0 + CHANNEL, algorithmFeedback);
-  writeChipRegister(chip, 0xB4 + CHANNEL, 0xC0); // Stereo + AMS + FMS
+  writeChipRegister(chip, 0xB4 + CHANNEL, 0xC0 | ((amplitudeModulationSensitivity << 4) & 0x30));
 
   for (unsigned char op_index = 0; op_index < 4; op_index++) {
     OPN2Operator op = operators[op_index];
-    unsigned char base_register = OP_OFFSETS[op_index] + CHANNEL;
-    unsigned char detune_multiplier = (op.detune << 4) | op.multiple;
-    unsigned char keyscale_attackrate = (0 << 6) | op.attackRate;
-    unsigned char am_decay_rate = (0 << 7) | op.decayRate; // No AM
-    unsigned char sustainlevel_releaserate = (op.sustainLevel << 4) | 0x0F;
+    uint8_t base_register = OP_OFFSETS[op_index] + CHANNEL;
+    uint8_t detune_multiplier = (op.detune << 4) | op.multiple;
+    uint8_t keyscale_attackrate = (0 << 6) | op.attackRate;
+    uint8_t am_decay_rate = ((uint8_t)op.amplitudeModulation << 7) | op.decayRate;
+    uint8_t sustainlevel_releaserate = (op.sustainLevel << 4) | 0x0F;
 
     writeChipRegister(chip, base_register, detune_multiplier);
     writeChipRegister(chip, base_register + 0x10, op.totalLevel);
@@ -183,10 +232,10 @@ void OPN2Individual::synthetize(double frequency, double duration, uint32_t samp
   OPN2_Reset(&chip, sampleRate, CHIP_CLOCK);
   OPN2_SetOptions(ym3438_type_ym2612);
 
-  // Disable DAC and disable LFO
+  // Disable DAC and enable LFO
   writeChipRegister(&chip, 0x2A, 0);
   writeChipRegister(&chip, 0x2B, 0);
-  writeChipRegister(&chip, 0x22, 0);
+  writeChipRegister(&chip, 0x22, 0x08);
 
   // Disable Timer A & B and put on normal mode
   writeChipRegister(&chip, 0x24, 0);

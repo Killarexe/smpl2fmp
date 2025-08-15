@@ -1,5 +1,5 @@
 #include "individual.h"
-#include "AudioFile/AudioFile.h"
+#include <AudioFile.h>
 #include <cstdint>
 
 void Individual::saveAudio(std::filesystem::path path, double frequency, double duration, uint32_t sampleRate) {

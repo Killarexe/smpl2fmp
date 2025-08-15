@@ -1,7 +1,7 @@
 #include "smpl2fmp.h"
 
-#include "CLI11/CLI11.hpp"
-#include "AudioFile/AudioFile.h"
+#include <CLI/CLI.hpp>
+#include <AudioFile.h>
 #include "Core/Individuals/OPN2Individual.h"
 #include "Core/individual.h"
 #include "wavefinder.h"

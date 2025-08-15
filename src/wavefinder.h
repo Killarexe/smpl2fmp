@@ -1,8 +1,9 @@
 #pragma once
 
-#include "AudioFile/AudioFile.h"
+#include <AudioFile.h>
 #include "Core/individual.h"
 #include "fftprocessor.h"
+#include "pgbar/pgbar.hpp"
 #include <complex>
 #include <cstddef>
 #include <fftw3.h>
@@ -48,6 +49,8 @@ class Wavefinder {
     void mutatePopulation(size_t generationsWithoutImprovement);
     void insertRandomIndividuals();
     void simulatedAnnealingStep(size_t generation);
+
+    pgbar::MultiBar<pgbar::ProgressBar<>, pgbar::ProgressBar<>> progressBars;
   
   public:
     double targetFrequency;

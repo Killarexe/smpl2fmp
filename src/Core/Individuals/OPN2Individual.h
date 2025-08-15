@@ -16,8 +16,12 @@ class OPN2Operator {
     uint8_t decayRate = 0;
     uint8_t sustainLevel = 0;
     uint8_t detune = 0;
+    bool amplitudeModulation = false;
 
     OPN2Operator() = default;
+
+    OPN2Operator crossover(const OPN2Operator& parent, std::mt19937& rng);
+    void mutate(double mutationRate, std::mt19937& rng);
 };
 
 class OPN2Individual : public Individual {
@@ -38,6 +42,7 @@ class OPN2Individual : public Individual {
 
     uint8_t algorithm = 0;
     uint8_t feedback = 0;
+    uint8_t amplitudeModulationSensitivity = 0;
     OPN2Operator operators[OPN2_OPERATOR_COUNT];
   private:
     void setPatch(ym3438_t* chip);
