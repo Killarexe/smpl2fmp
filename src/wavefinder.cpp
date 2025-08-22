@@ -7,6 +7,7 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fftw3.h>
@@ -16,6 +17,7 @@
 #include <random>
 #include <sstream>
 #include <omp.h>
+#include <vector>
 
 void Wavefinder::initializePopulation() {
   population.clear();
@@ -31,7 +33,7 @@ void Wavefinder::initializePopulation() {
 void Wavefinder::setTarget(const AudioFile<double> target) {
   targetSamples = target;
   findTargetBaseFrequency();
-  calulcateTargetEnergy();
+  calculateTargetEnergy();
 }
 
 void Wavefinder::calculateFitness(FFTProcessor& fft) {
@@ -54,48 +56,81 @@ void Wavefinder::calculateFitness(FFTProcessor& fft) {
   progressBars.reset<1>();
 }
 
+
 double Wavefinder::calculateSpectralDistanceFromTarget(const double* samples, const std::vector<double>& magnitudes) {
   if (targetSamples.samples.empty()) {
     return 1.0;
   }
 
-  const size_t sampleSize = targetSamples.samples[0].size(); 
+  /*size_t size = targetSamples.samples[0].size();
 
-  double spectralDiff = 0.0;
-  size_t i;
-  for (i = 1; i < magnitudes.size(); i++) {
-    spectralDiff += std::abs(magnitudes[i] - targetMagnitude[i]);
+  double meanTarget = std::accumulate(targetSamples.samples[0].begin(), targetSamples.samples[0].end(), 0.0) / size;
+  double meanGenerated = std::accumulate(samples, samples + size - 1, 0.0) / size;
+
+  double numerator = 0.0;
+  double sumTarget = 0.0;
+  double sumGenerated = 0.0;
+
+  for (size_t i = 0; i < size; ++i) {
+    double diffTarget = targetSamples.samples[0][i] - meanTarget;
+    double diffGenerated = samples[i] - meanGenerated;
+
+    numerator += diffTarget * diffGenerated;
+    sumTarget += diffTarget * diffTarget;
+    sumGenerated += diffGenerated * diffGenerated;
   }
-  double spectralScore = (double)magnitudes.size() / (1.0 + spectralDiff);
+
+  double denominator = std::sqrt(sumTarget * sumGenerated);
+  if (denominator < 1e-10) {
+    return 0.0;
+  }
+
+  double correlation = numerator / denominator;
+  return (correlation + 1.0) / 2.0;*/
 
   /*double timeDiff = 0.0;
   for (size_t i = 0; i < sampleSize; i++) {
     timeDiff += std::abs(samples[i] - targetSamples.samples[0][i]);
   }
-  timeDiff /= sampleSize;
+  timeDiff /= sampleSize;*/
 
+  double dotProduct = 0.0;
+  double normTarget = 0.0;
+  double normGenerated = 0.0;
+
+  size_t i;
+  for (i = 1; i < magnitudes.size(); i++) {
+    dotProduct += targetMagnitude[i] * magnitudes[i];
+    normTarget += targetMagnitude[i] * targetMagnitude[i];
+    normGenerated += magnitudes[i] * magnitudes[i];
+  }
+
+  double denominator = std::sqrt(normTarget * normGenerated);
+  if (denominator < 1e-10) {
+    return 0.0;
+  }
+
+  double spectralScore = dotProduct / denominator;
+
+  size_t sampleSize = targetSamples.samples[0].size();
   double envelopeDiff = 0.0;
-  if (!targetEnergy.empty()) {
-    const size_t windowSize = sampleSize / 10;
-    for (size_t w = 0; w < 10; w++) {
-      size_t start = w * windowSize;
-      size_t end = std::min(start + windowSize, sampleSize);
+  const size_t windowSize = sampleSize / 10;
+  for (size_t w = 0; w < 10; w++) {
+    size_t start = w * windowSize;
+    size_t end = std::min(start + windowSize, sampleSize);
 
-      double synthRMS = 0.0;
-      for (size_t i = start; i < end; i++) {
-        synthRMS += samples[i] * samples[i];
-      }
-
-      double synthEnergy = std::sqrt(synthRMS / (end - start));
-      envelopeDiff += std::abs(synthEnergy - targetEnergy[w]);
+    double synthRMS = 0.0;
+    for (size_t i = start; i < end; i++) {
+      synthRMS += samples[i] * samples[i];
     }
-    envelopeDiff /= targetEnergy.size();
-  }*/
 
-  return spectralScore;
+    double synthEnergy = std::sqrt(synthRMS / (end - start));
+    envelopeDiff += std::abs(synthEnergy - targetEnergy[w]);
+  }
+  return (1.0 - envelopeDiff) * 0.25 + spectralScore * 0.75;
 }
 
-void Wavefinder::calulcateTargetEnergy() {
+void Wavefinder::calculateTargetEnergy() {
   targetEnergy.clear();
   targetEnergy.reserve(10);
   const size_t windowSize = targetSamples.samples[0].size() / 10;

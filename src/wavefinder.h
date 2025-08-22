@@ -39,7 +39,7 @@ class Wavefinder {
     double calculateSpectralDistanceFromTarget(const double* samples, const std::vector<double>& magnitudes);
 
     void findTargetBaseFrequency();
-    void calulcateTargetEnergy();
+    void calculateTargetEnergy();
     
     std::vector<size_t> getSortedIndiciesByFitness();
     double calculatePopulationDiversity();
