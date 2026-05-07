@@ -1,38 +1,33 @@
-//
-// Copyright (C) 2017 Alexey Khokholov (Nuke.YKT)
-// 
-// This program is free software; you can redistribute it and/or
-// modify it under the terms of the GNU General Public License
-// as published by the Free Software Foundation; either version 2
-// of the License, or (at your option) any later version.
-// 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-// 
-// You should have received a copy of the GNU General Public License
-// along with this program; if not, write to the Free Software
-// Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-//
-//
-//  Nuked OPN2(Yamaha YM3438) emulator.
-//  Thanks:
-//      Silicon Pr0n:
-//          Yamaha YM3438 decap and die shot(digshadow).
-//      OPLx decapsulated(Matthew Gambrell, Olli Niemitalo):
-//          OPL2 ROMs.
-//
-// version: 1.0.7
-//
+/*
+ * Copyright (C) 2017-2018 Alexey Khokholov (Nuke.YKT)
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ *
+ *
+ *  Nuked OPN2(Yamaha YM3438) emulator.
+ *  Thanks:
+ *      Silicon Pr0n:
+ *          Yamaha YM3438 decap and die shot(digshadow).
+ *      OPLx decapsulated(Matthew Gambrell, Olli Niemitalo):
+ *          OPL2 ROMs.
+ *
+ * version: 1.0.9
+ */
 
 #include <string.h>
 #include "ym3438.h"
-
-#define OUTPUT_FACTOR 11
-#define OUTPUT_FACTOR_F 12
-#define FILTER_CUTOFF 0.512331301282628 // 5894Hz  single pole IIR low pass
-#define FILTER_CUTOFF_I (1-FILTER_CUTOFF)
 
 enum {
     eg_num_attack = 0,
@@ -221,8 +216,33 @@ static const Bit32u fm_algorithm[4][6][8] = {
     }
 };
 
-static Bit32u chip_type = ym3438_type_discrete;
-static Bit32u use_filter = 0;
+/*
+ * Pan law table
+ */
+
+static const Bit16u panlawtable[] =
+{
+    65535, 65529, 65514, 65489, 65454, 65409, 65354, 65289,
+    65214, 65129, 65034, 64929, 64814, 64689, 64554, 64410,
+    64255, 64091, 63917, 63733, 63540, 63336, 63123, 62901,
+    62668, 62426, 62175, 61914, 61644, 61364, 61075, 60776,
+    60468, 60151, 59825, 59489, 59145, 58791, 58428, 58057,
+    57676, 57287, 56889, 56482, 56067, 55643, 55211, 54770,
+    54320, 53863, 53397, 52923, 52441, 51951, 51453, 50947,
+    50433, 49912, 49383, 48846, 48302, 47750, 47191,
+    46340, /* Center left */
+    46340, /* Center right */
+    45472, 44885, 44291, 43690, 43083, 42469, 41848, 41221,
+    40588, 39948, 39303, 38651, 37994, 37330, 36661, 35986,
+    35306, 34621, 33930, 33234, 32533, 31827, 31116, 30400,
+    29680, 28955, 28225, 27492, 26754, 26012, 25266, 24516,
+    23762, 23005, 22244, 21480, 20713, 19942, 19169, 18392,
+    17613, 16831, 16046, 15259, 14469, 13678, 12884, 12088,
+    11291, 10492, 9691, 8888, 8085, 7280, 6473, 5666,
+    4858, 4050, 3240, 2431, 1620, 810, 0
+};
+
+static Bit32u chip_type = ym3438_mode_readmode;
 
 void OPN2_DoIO(ym3438_t *chip)
 {
@@ -241,7 +261,7 @@ void OPN2_DoIO(ym3438_t *chip)
 void OPN2_DoRegWrite(ym3438_t *chip)
 {
     Bit32u i;
-    Bit32u slot = chip->slot % 12;
+    Bit32u slot = chip->cycles % 12;
     Bit32u address;
     Bit32u channel = chip->channel;
     /* Update registers */
@@ -368,7 +388,7 @@ void OPN2_DoRegWrite(ym3438_t *chip)
         /* Data */
         if (chip->write_d_en && (chip->write_data & 0x100) == 0)
         {
-            switch (chip->address)
+            switch (chip->write_fm_mode_a)
             {
             case 0x21: /* LSI test 1 */
                 for (i = 0; i < 8; i++)
@@ -447,7 +467,7 @@ void OPN2_DoRegWrite(ym3438_t *chip)
         /* Address */
         if (chip->write_a_en)
         {
-            chip->write_fm_mode_a = chip->write_data & 0xff;
+            chip->write_fm_mode_a = chip->write_data & 0x1ff;
         }
     }
 
@@ -459,14 +479,16 @@ void OPN2_DoRegWrite(ym3438_t *chip)
 
 void OPN2_PhaseCalcIncrement(ym3438_t *chip)
 {
+    Bit32u chan = chip->channel;
+    Bit32u slot = chip->cycles;
     Bit32u fnum = chip->pg_fnum;
     Bit32u fnum_h = fnum >> 4;
     Bit32u fm;
     Bit32u basefreq;
     Bit8u lfo = chip->lfo_pm;
     Bit8u lfo_l = lfo & 0x0f;
-    Bit8u pms = chip->pms[chip->channel];
-    Bit8u dt = chip->dt[chip->slot];
+    Bit8u pms = chip->pms[chan];
+    Bit8u dt = chip->dt[slot];
     Bit8u dt_l = dt & 0x03;
     Bit8u detune = 0;
     Bit8u block, note;
@@ -520,21 +542,21 @@ void OPN2_PhaseCalcIncrement(ym3438_t *chip)
         basefreq += detune;
     }
     basefreq &= 0x1ffff;
-    chip->pg_inc[chip->slot] = (basefreq * chip->multi[chip->slot]) >> 1;
-    chip->pg_inc[chip->slot] &= 0xfffff;
+    chip->pg_inc[slot] = (basefreq * chip->multi[slot]) >> 1;
+    chip->pg_inc[slot] &= 0xfffff;
 }
 
 void OPN2_PhaseGenerate(ym3438_t *chip)
 {
     Bit32u slot;
     /* Mask increment */
-    slot = (chip->slot + 20) % 24;
+    slot = (chip->cycles + 20) % 24;
     if (chip->pg_reset[slot])
     {
         chip->pg_inc[slot] = 0;
     }
     /* Phase step */
-    slot = (chip->slot + 19) % 24;
+    slot = (chip->cycles + 19) % 24;
     chip->pg_phase[slot] += chip->pg_inc[slot];
     chip->pg_phase[slot] &= 0xfffff;
     if (chip->pg_reset[slot] || chip->mode_test_21[3])
@@ -545,7 +567,7 @@ void OPN2_PhaseGenerate(ym3438_t *chip)
 
 void OPN2_EnvelopeSSGEG(ym3438_t *chip)
 {
-    Bit32u slot = chip->slot;
+    Bit32u slot = chip->cycles;
     Bit8u direction = 0;
     chip->eg_ssg_pgrst_latch[slot] = 0;
     chip->eg_ssg_repeat_latch[slot] = 0;
@@ -592,7 +614,7 @@ void OPN2_EnvelopeSSGEG(ym3438_t *chip)
 
 void OPN2_EnvelopeADSR(ym3438_t *chip)
 {
-    Bit32u slot = (chip->slot + 22) % 24;
+    Bit32u slot = (chip->cycles + 22) % 24;
 
     Bit8u nkon = chip->eg_kon_latch[slot];
     Bit8u okon = chip->eg_kon[slot];
@@ -719,7 +741,7 @@ void OPN2_EnvelopePrepare(ym3438_t *chip)
     Bit8u rate;
     Bit8u sum;
     Bit8u inc = 0;
-    Bit32u slot = chip->slot;
+    Bit32u slot = chip->cycles;
     Bit8u rate_sel;
 
     /* Prepare increment */
@@ -804,7 +826,7 @@ void OPN2_EnvelopePrepare(ym3438_t *chip)
 
 void OPN2_EnvelopeGenerate(ym3438_t *chip)
 {
-    Bit32u slot = (chip->slot + 23) % 24;
+    Bit32u slot = (chip->cycles + 23) % 24;
     Bit16u level;
 
     level = chip->eg_level[slot];
@@ -851,12 +873,12 @@ void OPN2_UpdateLFO(ym3438_t *chip)
 
 void OPN2_FMPrepare(ym3438_t *chip)
 {
-    Bit32u slot = (chip->slot + 6) % 24;
+    Bit32u slot = (chip->cycles + 6) % 24;
     Bit32u channel = chip->channel;
     Bit16s mod, mod1, mod2;
     Bit32u op = slot / 6;
     Bit8u connect = chip->connect[channel];
-    Bit32u prevslot = (chip->slot + 18) % 24;
+    Bit32u prevslot = (chip->cycles + 18) % 24;
 
     /* Calculate modulation */
     mod1 = mod2 = 0;
@@ -897,7 +919,7 @@ void OPN2_FMPrepare(ym3438_t *chip)
     }
     chip->fm_mod[slot] = mod;
 
-    slot = (chip->slot + 18) % 24;
+    slot = (chip->cycles + 18) % 24;
     /* OP1 */
     if (slot / 6 == 0)
     {
@@ -913,7 +935,7 @@ void OPN2_FMPrepare(ym3438_t *chip)
 
 void OPN2_ChGenerate(ym3438_t *chip)
 {
-    Bit32u slot = (chip->slot + 18) % 24;
+    Bit32u slot = (chip->cycles + 18) % 24;
     Bit32u channel = chip->channel;
     Bit32u op = slot / 6;
     Bit32u test_dac = chip->mode_test_2c[5];
@@ -949,13 +971,14 @@ void OPN2_ChGenerate(ym3438_t *chip)
 void OPN2_ChOutput(ym3438_t *chip)
 {
     Bit32u cycles = chip->cycles;
+    Bit32u slot = chip->cycles;
     Bit32u channel = chip->channel;
     Bit32u test_dac = chip->mode_test_2c[5];
     Bit16s out;
     Bit16s sign;
     Bit32u out_en;
     chip->ch_read = chip->ch_lock;
-    if (chip->slot < 12)
+    if (slot < 12)
     {
         /* Ch 4,5,6 */
         channel++;
@@ -984,7 +1007,7 @@ void OPN2_ChOutput(ym3438_t *chip)
     chip->mol = 0;
     chip->mor = 0;
 
-    if (chip_type == ym3438_type_ym2612)
+    if (chip_type & ym3438_mode_ym2612)
     {
         out_en = ((cycles & 3) == 3) || test_dac;
         /* YM2612 DAC emulation(not verified) */
@@ -1017,11 +1040,6 @@ void OPN2_ChOutput(ym3438_t *chip)
     else
     {
         out_en = ((cycles & 3) != 0) || test_dac;
-        /* Discrete YM3438 seems has the ladder effect too */
-        if (out >= 0 && chip_type == ym3438_type_discrete)
-        {
-            out++;
-        }
         if (chip->ch_lock_l && out_en)
         {
             chip->mol = out;
@@ -1035,7 +1053,7 @@ void OPN2_ChOutput(ym3438_t *chip)
 
 void OPN2_FMGenerate(ym3438_t *chip)
 {
-    Bit32u slot = (chip->slot + 19) % 24;
+    Bit32u slot = (chip->cycles + 19) % 24;
     /* Calculate phase */
     Bit16u phase = (chip->fm_mod[slot] + (chip->pg_phase[slot] >> 10)) & 0x3ff;
     Bit16u quarter;
@@ -1167,32 +1185,34 @@ void OPN2_DoTimerB(ym3438_t *chip)
 
 void OPN2_KeyOn(ym3438_t*chip)
 {
+    Bit32u slot = chip->cycles;
+    Bit32u chan = chip->channel;
     /* Key On */
-    chip->eg_kon_latch[chip->slot] = chip->mode_kon[chip->slot];
-    chip->eg_kon_csm[chip->slot] = 0;
+    chip->eg_kon_latch[slot] = chip->mode_kon[slot];
+    chip->eg_kon_csm[slot] = 0;
     if (chip->channel == 2 && chip->mode_kon_csm)
     {
         /* CSM Key On */
-        chip->eg_kon_latch[chip->slot] = 1;
-        chip->eg_kon_csm[chip->slot] = 1;
+        chip->eg_kon_latch[slot] = 1;
+        chip->eg_kon_csm[slot] = 1;
     }
     if (chip->cycles == chip->mode_kon_channel)
     {
         /* OP1 */
-        chip->mode_kon[chip->channel] = chip->mode_kon_operator[0];
+        chip->mode_kon[chan] = chip->mode_kon_operator[0];
         /* OP2 */
-        chip->mode_kon[chip->channel + 12] = chip->mode_kon_operator[1];
+        chip->mode_kon[chan + 12] = chip->mode_kon_operator[1];
         /* OP3 */
-        chip->mode_kon[chip->channel + 6] = chip->mode_kon_operator[2];
+        chip->mode_kon[chan + 6] = chip->mode_kon_operator[2];
         /* OP4 */
-        chip->mode_kon[chip->channel + 18] = chip->mode_kon_operator[3];
+        chip->mode_kon[chan + 18] = chip->mode_kon_operator[3];
     }
 }
 
 void OPN2_Reset(ym3438_t *chip, Bit32u rate, Bit32u clock)
 {
     Bit32u i, rateratio;
-    rateratio = chip->rateratio;
+    rateratio = (Bit32u)chip->rateratio;
     memset(chip, 0, sizeof(ym3438_t));
     for (i = 0; i < 24; i++)
     {
@@ -1205,29 +1225,28 @@ void OPN2_Reset(ym3438_t *chip, Bit32u rate, Bit32u clock)
     {
         chip->pan_l[i] = 1;
         chip->pan_r[i] = 1;
+        chip->pan_volume_l[i] = 46340;
+        chip->pan_volume_r[i] = 46340;
     }
+
     if (rate != 0)
     {
-        chip->rateratio = (Bit32u)((((Bit64u)144 * rate) << RSM_FRAC) / clock);
+        chip->rateratio = (Bit32s)(Bit32u)((((Bit64u)144 * rate) << RSM_FRAC) / clock);
     }
     else
     {
-        chip->rateratio = rateratio;
+        chip->rateratio = (Bit32s)rateratio;
     }
 }
 
 void OPN2_SetChipType(Bit32u type)
 {
-    use_filter = 0;
-    if(type == ym3438_type_ym2612)
-        use_filter = 1;
-    if(type == ym3438_type_ym2612_u)
-        type = ym3438_type_ym2612;
     chip_type = type;
 }
 
-void OPN2_Clock(ym3438_t *chip, Bit32s *buffer)
+void OPN2_Clock(ym3438_t *chip, Bit16s *buffer)
 {
+    Bit32u slot = chip->cycles;
     chip->lfo_inc = chip->mode_test_21[1];
     chip->pg_read >>= 1;
     chip->eg_read[1] >>= 1;
@@ -1318,7 +1337,7 @@ void OPN2_Clock(ym3438_t *chip, Bit32s *buffer)
     if (chip->mode_ch3)
     {
         /* Channel 3 special mode */
-        switch (chip->slot)
+        switch (slot)
         {
         case 1: /* OP1 */
             chip->pg_fnum = chip->fnum_3ch[1];
@@ -1353,11 +1372,13 @@ void OPN2_Clock(ym3438_t *chip, Bit32s *buffer)
     OPN2_UpdateLFO(chip);
     OPN2_DoRegWrite(chip);
     chip->cycles = (chip->cycles + 1) % 24;
-    chip->slot = chip->cycles;
     chip->channel = chip->cycles % 6;
 
     buffer[0] = chip->mol;
     buffer[1] = chip->mor;
+
+    if (chip->status_time)
+        chip->status_time--;
 }
 
 void OPN2_Write(ym3438_t *chip, Bit32u port, Bit8u data)
@@ -1397,11 +1418,12 @@ Bit32u OPN2_ReadIRQPin(ym3438_t *chip)
 
 Bit8u OPN2_Read(ym3438_t *chip, Bit32u port)
 {
-    if ((port & 3) == 0 || chip_type == ym3438_type_asic)
+    if ((port & 3) == 0 || (chip_type & ym3438_mode_readmode))
     {
         if (chip->mode_test_21[6])
         {
             /* Read test data */
+            Bit32u slot = (chip->cycles + 18) % 24;
             Bit16u testdata = ((chip->pg_read & 0x01) << 15)
                             | ((chip->eg_read[chip->mode_test_21[0]] & 0x01) << 14);
             if (chip->mode_test_2c[4])
@@ -1410,30 +1432,48 @@ Bit8u OPN2_Read(ym3438_t *chip, Bit32u port)
             }
             else
             {
-                testdata |= chip->fm_out[(chip->slot + 18) % 24] & 0x3fff;
+                testdata |= chip->fm_out[slot] & 0x3fff;
             }
             if (chip->mode_test_21[7])
             {
-                return testdata & 0xff;
+                chip->status = testdata & 0xff;
             }
             else
             {
-                return testdata >> 8;
+                chip->status = testdata >> 8;
             }
         }
         else
         {
-            return (chip->busy << 7) | (chip->timer_b_overflow_flag << 1)
+            chip->status = (chip->busy << 7) | (chip->timer_b_overflow_flag << 1)
                  | chip->timer_a_overflow_flag;
         }
+        if (chip_type & ym3438_mode_ym2612)
+        {
+            chip->status_time = 300000;
+        }
+        else
+        {
+            chip->status_time = 40000000;
+        }
+    }
+    if (chip->status_time)
+    {
+        return chip->status;
     }
     return 0;
+}
+
+void OPN2_WritePan(ym3438_t *chip, Bit32u channel, Bit8u data)
+{
+    chip->pan_volume_l[channel] = panlawtable[data & 0x7F];
+    chip->pan_volume_r[channel] = panlawtable[0x7F - (data & 0x7F)];
 }
 
 void OPN2_WriteBuffered(ym3438_t *chip, Bit32u port, Bit8u data)
 {
     Bit64u time1, time2;
-    Bit32s buffer[2];
+    Bit16s buffer[2];
     Bit64u skip;
 
     if (chip->writebuf[chip->writebuf_last].port & 0x04)
@@ -1465,115 +1505,118 @@ void OPN2_WriteBuffered(ym3438_t *chip, Bit32u port, Bit8u data)
     chip->writebuf_last = (chip->writebuf_last + 1) % OPN_WRITEBUF_SIZE;
 }
 
-void OPN2_GenerateResampled(ym3438_t *chip, Bit32s *buf)
+void OPN2_Generate(ym3438_t *chip, Bit16s *buf)
 {
     Bit32u i;
-    Bit32s buffer[2];
+    Bit16s buffer[2];
     Bit32u mute;
-    
+    Bit32s channel = -1;
+
+    buf[0] = 0;
+    buf[1] = 0;
+
+    for (i = 0; i < 24; i++)
+    {
+        switch (chip->cycles >> 2)
+        {
+        case 0: /* Ch 2 */
+            mute = chip->mute[1];
+            channel = 1;
+            break;
+        case 1: /* Ch 6, DAC */
+            mute = chip->mute[5 + chip->dacen];
+            channel = 5;
+            break;
+        case 2: /* Ch 4 */
+            mute = chip->mute[3];
+            channel = 3;
+            break;
+        case 3: /* Ch 1 */
+            mute = chip->mute[0];
+            channel = 0;
+            break;
+        case 4: /* Ch 5 */
+            mute = chip->mute[4];
+            channel = 4;
+            break;
+        case 5: /* Ch 3 */
+            mute = chip->mute[2];
+            channel = 2;
+            break;
+        default:
+            mute = 0;
+            break;
+        }
+        OPN2_Clock(chip, buffer);
+        if (!mute)
+        {
+            if (channel >= 0)
+            {
+                buffer[0] = buffer[0] * chip->pan_volume_l[channel] / 65535;
+                buffer[1] = buffer[1] * chip->pan_volume_r[channel] / 65535;
+            }
+            buf[0] += buffer[0];
+            buf[1] += buffer[1];
+        }
+
+        while (chip->writebuf[chip->writebuf_cur].time <= chip->writebuf_samplecnt)
+        {
+            if (!(chip->writebuf[chip->writebuf_cur].port & 0x04))
+            {
+                break;
+            }
+            chip->writebuf[chip->writebuf_cur].port &= 0x03;
+            OPN2_Write(chip, chip->writebuf[chip->writebuf_cur].port,
+                       chip->writebuf[chip->writebuf_cur].data);
+            chip->writebuf_cur = (chip->writebuf_cur + 1) % OPN_WRITEBUF_SIZE;
+        }
+        chip->writebuf_samplecnt++;
+    }
+}
+
+void OPN2_GenerateResampled(ym3438_t *chip, Bit16s *buf)
+{
+    Bit16s buffer[2];
+
     while (chip->samplecnt >= chip->rateratio)
     {
         chip->oldsamples[0] = chip->samples[0];
         chip->oldsamples[1] = chip->samples[1];
-        chip->samples[0] = chip->samples[1] = 0;
-        for (i = 0; i < 24; i++)
-        {
-            switch (chip->cycles >> 2)
-            {
-            case 0: // Ch 2
-                mute = chip->mute[1];
-                break;
-            case 1: // Ch 6, DAC
-                mute = chip->mute[5 + chip->dacen];
-                break;
-            case 2: // Ch 4
-                mute = chip->mute[3];
-                break;
-            case 3: // Ch 1
-                mute = chip->mute[0];
-                break;
-            case 4: // Ch 5
-                mute = chip->mute[4];
-                break;
-            case 5: // Ch 3
-                mute = chip->mute[2];
-                break;
-            default:
-                mute = 0;
-                break;
-            }
-            OPN2_Clock(chip, buffer);
-            if (!mute)
-            {
-                chip->samples[0] += buffer[0];
-                chip->samples[1] += buffer[1];
-            }
-
-            while (chip->writebuf[chip->writebuf_cur].time <= chip->writebuf_samplecnt)
-            {
-                if (!(chip->writebuf[chip->writebuf_cur].port & 0x04))
-                {
-                    break;
-                }
-                chip->writebuf[chip->writebuf_cur].port &= 0x03;
-                OPN2_Write(chip, chip->writebuf[chip->writebuf_cur].port,
-                              chip->writebuf[chip->writebuf_cur].data);
-                chip->writebuf_cur = (chip->writebuf_cur + 1) % OPN_WRITEBUF_SIZE;
-            }
-            chip->writebuf_samplecnt++;
-        }
-        if(!use_filter)
-        {
-            chip->samples[0] *= OUTPUT_FACTOR;
-            chip->samples[1] *= OUTPUT_FACTOR;
-        }
-        else
-        {
-            chip->samples[0] = chip->oldsamples[0] + FILTER_CUTOFF_I * (chip->samples[0]*OUTPUT_FACTOR_F - chip->oldsamples[0]);
-            chip->samples[1] = chip->oldsamples[1] + FILTER_CUTOFF_I * (chip->samples[1]*OUTPUT_FACTOR_F - chip->oldsamples[1]);
-        }
+        OPN2_Generate(chip, buffer);
+        chip->samples[0] = buffer[0] * 11;
+        chip->samples[1] = buffer[1] * 11;
         chip->samplecnt -= chip->rateratio;
     }
-    buf[0] = (Bit32s)((chip->oldsamples[0] * (chip->rateratio - chip->samplecnt)
-                     + chip->samples[0] * chip->samplecnt) / chip->rateratio);
-    buf[1] = (Bit32s)((chip->oldsamples[1] * (chip->rateratio - chip->samplecnt)
-                     + chip->samples[1] * chip->samplecnt) / chip->rateratio);
+    buf[0] = (Bit16s)(((chip->oldsamples[0] * (chip->rateratio - chip->samplecnt)
+                     + chip->samples[0] * chip->samplecnt) / chip->rateratio)>>1);
+    buf[1] = (Bit16s)(((chip->oldsamples[1] * (chip->rateratio - chip->samplecnt)
+                     + chip->samples[1] * chip->samplecnt) / chip->rateratio)>>1);
     chip->samplecnt += 1 << RSM_FRAC;
 }
 
-void OPN2_GenerateStream(ym3438_t *chip, Bit32s **sndptr, Bit32u numsamples)
+void OPN2_GenerateStream(ym3438_t *chip, Bit16s *output, Bit32u numsamples)
 {
     Bit32u i;
-    Bit32s *smpl, *smpr;
-    Bit32s buffer[2];
-    smpl = sndptr[0];
-    smpr = sndptr[1];
+    Bit16s buffer[2];
 
     for (i = 0; i < numsamples; i++)
     {
         OPN2_GenerateResampled(chip, buffer);
-        *smpl++ = buffer[0];
-        *smpr++ = buffer[1];
+        *output++ = buffer[0];
+        *output++ = buffer[1];
     }
 }
 
-void OPN2_SetOptions(Bit8u flags)
+void OPN2_GenerateStreamMix(ym3438_t *chip, Bit16s *output, Bit32u numsamples)
 {
-    switch ((flags >> 3) & 0x03)
+    Bit32u i;
+    Bit16s buffer[2];
+
+    for (i = 0; i < numsamples; i++)
     {
-    case 0x00: // YM2612
-    default:
-        OPN2_SetChipType(ym3438_type_ym2612);
-        break;
-    case 0x01: // ASIC YM3438
-        OPN2_SetChipType(ym3438_type_asic);
-        break;
-    case 0x02: // Discrete YM3438
-        OPN2_SetChipType(ym3438_type_discrete);
-        break;
-    case 0x03: // YM2612 without filter emulation
-        OPN2_SetChipType(ym3438_type_ym2612_u);
-        break;
+        OPN2_GenerateResampled(chip, buffer);
+        *output++ += buffer[0];
+        *output++ += buffer[1];
     }
 }
 
