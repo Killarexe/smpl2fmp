@@ -96,6 +96,7 @@ double* averaged_spectrum(const double* samples, size_t size, size_t* output_siz
     average[i] = 20.0 * log10(average[i] + 1e-9);
   }
 
+  free(buffer);
   free(window);
   *output_size = frames;
   return average;
